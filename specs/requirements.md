@@ -22,7 +22,7 @@ RevoTask lets authenticated users manage boards, columns, and cards. Cards can b
 - **[Extension]** marks functionality outside the 26 mandatory endpoints. The only extension is `POST /api/boards/{id}/members` (BOARD-007), approved in UD-24.
 - Requirement IDs use the form `CATEGORY-NNN`. Acceptance criterion IDs use the form `CATEGORY-NNN-ACnn`.
 - Path parameters are written as `{id}`.
-- Requirements and acceptance criteria that depend on an unresolved decision name the decision (for example `UD-14`) and are marked **Blocked**. A blocked criterion cannot be tested until the decision is approved.
+- Requirements and acceptance criteria that depend on an unresolved decision name the decision (written as `Blocked by UD-nn`) and are marked **Blocked**. A blocked criterion cannot be tested until the decision is approved.
 
 ### 1.4 Derived assumptions (to confirm)
 These inferences are embedded in acceptance criteria. They are not open questions, but they are not stated verbatim in the brief. Confirm or correct them.
@@ -100,6 +100,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 404 | A notification belongs to another user, with the same status and body as a notification that does not exist | Approved (UD-08) |
 | 400 | `assignee_id` names a user who does not exist or is not a member of the card's board, with an identical body for both cases | Approved (UD-08) |
 | 400 | `assignee_id` is sent when creating a card | Approved (UD-08) |
+| 400 | A member sends any query parameter to `GET /api/boards/{id}/analytics` | Approved (UD-14) |
 | 404 | Resource does not exist | Proposed, not approved (UD-19) |
 | 409 | Registration or profile update with an email already in use | Proposed, not approved (UD-19) |
 | 500 | Unhandled server error | Proposed, not approved (UD-19) |
@@ -562,12 +563,27 @@ The events that do not notify are: card creation, card unassignment, assigning a
 ### 3.7 Board analytics (ANALYTICS)
 
 ### ANALYTICS-001 Analytics endpoint access
-`GET /api/boards/{id}/analytics` MUST return board analytics to the board's members.
+`GET /api/boards/{id}/analytics` MUST return the board's analytics for the current UTC reporting week to the board's members. It reports only the current week, supports no custom date ranges, and accepts no query parameters (approved, UD-14). It adds no endpoint. The response uses the standard `{ "data": ... }` envelope and has this shape:
+
+```json
+{ "data": {
+  "window": { "start": "2025-01-13T00:00:00Z", "end": "2025-01-20T00:00:00Z" },
+  "cards_per_column": [ { "column_id": "<uuid>", "name": "To Do", "card_count": 3 } ],
+  "completed_this_week": 2,
+  "member_activity": [ { "user_id": "<uuid>", "name": "Ana", "activity_count": 5 } ]
+} }
+```
 
 **Acceptance criteria**
-- **ANALYTICS-001-AC01** A member receives HTTP 200 and `data` contains total cards per column, cards completed this week, and member activity.
+- **ANALYTICS-001-AC01** A member receives HTTP 200, and `data` has exactly the keys `window`, `cards_per_column`, `completed_this_week`, and `member_activity` inside the `{ "data": ... }` envelope.
 - **ANALYTICS-001-AC02** A non-member receives HTTP 404.
 - **ANALYTICS-001-AC03** A request with no token returns HTTP 401.
+- **ANALYTICS-001-AC04** `window` has exactly the keys `start` and `end`. Both are UTC ISO 8601 timestamps in the form `YYYY-MM-DDTHH:MM:SSZ`. `start` is a Monday at 00:00:00 UTC, `end` is exactly 7 days after `start`, and the server's current UTC time satisfies `start <= now < end`.
+- **ANALYTICS-001-AC05** Each `cards_per_column` entry has exactly the keys `column_id` (a UUID string), `name`, and `card_count` (an integer of at least 0), and the entries are ordered by ascending column position.
+- **ANALYTICS-001-AC06** `completed_this_week` is an integer of at least 0.
+- **ANALYTICS-001-AC07** Each `member_activity` entry has exactly the keys `user_id` (a UUID string), `name`, and `activity_count` (an integer of at least 0). The entries are ordered by `activity_count` descending, then `name` ascending, then `user_id` ascending. No entry contains an email address or any other private profile field.
+- **ANALYTICS-001-AC08** For a board that has no columns, `cards_per_column` is `[]`, `completed_this_week` is 0, and `member_activity` has one entry for each current board member with `activity_count` 0 when no qualifying events exist. No key is omitted and no value is null.
+- **ANALYTICS-001-AC09** A member who sends any query parameter (for example `week`, `start`, `end`, or an unknown name) receives HTTP 400 with an `error` message and no analytics data. A non-member who sends a query parameter receives HTTP 404, and a request with no token receives HTTP 401 (Section 2.4).
 
 ### ANALYTICS-002 Total cards per column
 The analytics MUST include the number of cards in each column.
@@ -577,27 +593,43 @@ The analytics MUST include the number of cards in each column.
 - **ANALYTICS-002-AC02** Cards with a non-null `deleted_at` are not counted.
 - **ANALYTICS-002-AC03** Soft-deleted columns are absent from the per-column result, and cards that were soft-deleted with their column are not counted anywhere (approved, UD-18 and UD-23).
 - **ANALYTICS-002-AC04** After a column holding 3 cards is deleted, the response lists one column fewer and the total number of counted cards drops by 3.
+- **ANALYTICS-002-AC05** `cards_per_column` lists every non-soft-deleted column of the board in ascending position order, with `card_count` equal to the number of its non-soft-deleted cards, and a column without cards appears with `card_count` 0. The counts are a snapshot of the current state and do not depend on the reporting window.
 
 ### ANALYTICS-003 Cards completed this week
-The analytics MUST include the number of cards completed this week. A card's current column alone MUST NOT be used as proof that it was completed during the current week. The completion time MUST come from a recorded completion timestamp. "Completed" is defined by the approved UD-12: a card is completed while it is in a done column, and `completed_at` records when it entered. The definition of "this week" is unresolved (UD-14).
+The analytics MUST include `completed_this_week`: the number of non-soft-deleted cards in non-soft-deleted done columns whose current `completed_at` lies inside the reporting window (`window_start <= completed_at < window_end`, UTC; approved, UD-14). Each card counts at most once. The count uses the current `completed_at` only and does not reconstruct completions from activity events, and no completion history is stored. For a non-deleted card in a non-deleted column, `completed_at` is non-null if and only if the column is marked done (UD-12, A-13). A card in a column that was newly marked done counts as completed this week, even if the card was created months earlier. A card completed twice counts once, with its latest `completed_at`.
+
+In the criteria below the server clock is fixed at `2025-01-15T12:00:00Z` (a Wednesday) unless stated otherwise, so the window is `2025-01-13T00:00:00Z` (inclusive) to `2025-01-20T00:00:00Z` (exclusive).
 
 **Acceptance criteria**
-- **ANALYTICS-003-AC01** **Blocked by UD-14.** Given 2 cards whose recorded completion time is inside the approved week and 1 card whose recorded completion time is before that week, the reported value is 2.
-- **ANALYTICS-003-AC02** **Blocked by UD-14.** A card that was completed before the week and is still in a done column is not counted.
-- **ANALYTICS-003-AC03** **Blocked by UD-14.** A card completed this week and then moved out of every done column is not counted.
-- **ANALYTICS-003-AC04** **Blocked by UD-14.** A card completed this week and then soft-deleted is not counted.
-- **ANALYTICS-003-AC05** **Blocked by UD-14.** A card completed this week in a done column that is then soft-deleted is not counted, and neither is any card of that column.
+- **ANALYTICS-003-AC01** Given 2 cards in a done column with `completed_at` `2025-01-14T09:00:00Z` and `2025-01-15T08:00:00Z`, and 1 card in the same column with `completed_at` `2025-01-10T09:00:00Z`, `completed_this_week` is 2.
+- **ANALYTICS-003-AC02** A card with `completed_at` `2025-01-10T09:00:00Z` that is still in a done column is not counted.
+- **ANALYTICS-003-AC03** A card completed on `2025-01-14T09:00:00Z` and then moved to an active column has a null `completed_at` and is not counted.
+- **ANALYTICS-003-AC04** A card completed this week and then soft-deleted keeps its `completed_at` and is not counted.
+- **ANALYTICS-003-AC05** After a done column holding cards completed this week is soft-deleted, none of its cards is counted.
+- **ANALYTICS-003-AC06** A card with `completed_at` `2025-01-13T00:00:00Z` is counted, and a card with `completed_at` `2025-01-12T23:59:59.999999Z` is not (start inclusive).
+- **ANALYTICS-003-AC07** With the clock fixed at `2025-01-19T23:59:59.900000Z`, the window ends at `2025-01-20T00:00:00Z`, and a card with `completed_at` `2025-01-19T23:59:59.500000Z` is counted (Sunday fractional-second inclusion).
+- **ANALYTICS-003-AC08** With the clock fixed at `2025-01-20T00:00:00Z`, the window is `2025-01-20T00:00:00Z` to `2025-01-27T00:00:00Z`, the card of AC07 is no longer counted, and a card with `completed_at` `2025-01-20T00:00:00Z` is counted (week rollover and end exclusive).
+- **ANALYTICS-003-AC09** After any sequence of the endpoints in Section 3.0, every non-deleted card in a non-deleted column has a non-null `completed_at` if and only if its column is marked done.
+- **ANALYTICS-003-AC10** A card that is completed, moved to an active column, and completed again is counted once and has the later `completed_at`. When the first completion was before the window and the second is inside it, the card is counted this week.
+- **ANALYTICS-003-AC11** A card moved from one done column to another keeps its `completed_at`: a card completed before the window is still not counted, and a card completed inside the window is counted once.
+- **ANALYTICS-003-AC12** When an administrator marks a column done, its 3 existing non-deleted cards, which were created weeks earlier, are counted as completed this week and `completed_this_week` rises by 3. When the column is marked active again, `completed_this_week` falls by 3.
+- **ANALYTICS-003-AC13** `completed_this_week` is the same before and after all activity-event rows of the board are removed in a test, because it does not depend on events.
 
 ### ANALYTICS-004 Member activity
-The analytics MUST include member activity. Activity MUST be taken from the activity-event records (ANALYTICS-006) and not inferred from current data. Member activity counts card creation, card movement, and comments (approved, UD-13). Member activity uses the reporting window defined by UD-14 (approved, A-14). The calendar boundary of that window is unresolved (UD-14).
+The analytics MUST include member activity. Activity MUST be taken from the activity-event records (ANALYTICS-006) and not inferred from current data. A member's `activity_count` is the number of that member's activity events of the three approved types (`card_created`, `card_moved`, `comment_created`; approved, UD-13) for this board whose event time lies inside the same reporting window as `completed_this_week` (`window_start <= event time < window_end`, UTC; approved, UD-14 and A-14). Each event counts once. The response has one entry for each current board member, and a current member with no qualifying events has `activity_count` 0. A member who joined during the week keeps all their qualifying events of that week, without proration. Former members get no entry. Events whose card, column, or comment was later soft-deleted or deleted still count. There is no per-type breakdown. The criteria use the clock and window of ANALYTICS-003 (fixed at `2025-01-15T12:00:00Z`) unless stated otherwise.
 
 **Acceptance criteria**
-- **ANALYTICS-004-AC01** The response includes one activity entry for each member of the board, and a member with no recorded events has an activity count of 0.
-- **ANALYTICS-004-AC02** Creating a card, moving a card to another column, and creating a comment each increase the acting member's activity count by 1 in the next analytics response.
-- **ANALYTICS-004-AC03** **Blocked by UD-14.** Events recorded before the activity window defined in UD-14 are not counted.
+- **ANALYTICS-004-AC01** The response includes one activity entry for each current member of the board, and a current member with no recorded events has an activity count of 0.
+- **ANALYTICS-004-AC02** When the event time is inside the reporting window, creating a card, moving a card to another column, and creating a comment each increase the acting member's activity count by 1 in the next analytics response.
+- **ANALYTICS-004-AC03** An event with time `2025-01-12T23:59:59.999999Z` (before the window) is not counted, and an event with time `2025-01-13T00:00:00Z` is counted (start inclusive).
 - **ANALYTICS-004-AC04** Events performed on another board are not counted for this board.
-- **ANALYTICS-004-AC05** **Blocked by UD-14.** The window used to count member activity is the same window used to count cards completed this week (approved, A-14).
+- **ANALYTICS-004-AC05** `completed_this_week` and every `activity_count` are computed with the single `window` returned in the same response, which comes from one reading of the server clock (approved, A-14 and UD-14). An event and a card completion with the same timestamp are both inside or both outside that window.
 - **ANALYTICS-004-AC06** After a card, or the column that holds it, is soft-deleted, the activity counts of the board's members are unchanged, because the events of the deleted card and column still count (approved, UD-13 and A-13).
+- **ANALYTICS-004-AC07** With the clock fixed at `2025-01-19T23:59:59.900000Z`, an event with time `2025-01-19T23:59:59.500000Z` is counted. With the clock fixed at `2025-01-20T00:00:00Z`, the window is `2025-01-20T00:00:00Z` to `2025-01-27T00:00:00Z` and that event is no longer counted (end exclusive and rollover).
+- **ANALYTICS-004-AC08** Three card-moved events by one member inside the window give that member an `activity_count` of 3, whether they involve one card or three cards.
+- **ANALYTICS-004-AC09** A card assignment, a comment edit or deletion, a done-column toggle, a card deletion, and a column deletion leave every member's `activity_count` unchanged.
+- **ANALYTICS-004-AC10** A user added to the board on Wednesday appears in `member_activity`, and every qualifying event of that user inside the window is counted without proration.
+- **ANALYTICS-004-AC11** A user who has no current membership row for the board (the row is removed directly in the test, because no endpoint removes members) has no entry in `member_activity`, and no private data of that user appears in the response.
 
 ### ANALYTICS-005 Implementation constraint
 Analytics MUST be calculated with SQLAlchemy joins in the service layer.
@@ -606,6 +638,7 @@ Analytics MUST be calculated with SQLAlchemy joins in the service layer.
 - **ANALYTICS-005-AC01** The route handler for `GET /api/boards/{id}/analytics` contains no query construction and delegates to a service-layer function.
 - **ANALYTICS-005-AC02** A test that records the SQL emitted during an analytics request finds at least one statement containing `JOIN`.
 - **ANALYTICS-005-AC03** Recording the SQL for each of the three metrics separately (cards per column, cards completed this week, member activity) finds a `JOIN` in the statement for each metric.
+- **ANALYTICS-005-AC04** The service layer computes the reporting window once per request from the current UTC time, uses that window for both `completed_this_week` and `member_activity`, and reads the time from a clock that tests can fix. Tests never depend on the real current date.
 
 ### ANALYTICS-006 Activity-event recording
 The service layer MUST record an append-only activity event, in the same database transaction as the action, for each card creation, each card movement to another column, and each comment creation (approved, UD-13). The event type names below are working names. Events MUST survive the soft-deletion of their column or card and the deletion of their comment. They are removed only when their board is hard-deleted (approved, UD-18). Further approved behavior is in A-13 and A-14.
@@ -621,6 +654,7 @@ The service layer MUST record an append-only activity event, in the same databas
 - **ANALYTICS-006-AC08** A successful `PATCH /api/comments/{id}` and a successful `DELETE /api/comments/{id}` each record no activity event, and the acting member's activity count is unchanged (approved, A-14).
 - **ANALYTICS-006-AC09** After a column is soft-deleted together with its cards, every activity event that references the column or its cards still exists with unchanged values and remains readable. A successful `DELETE /api/columns/{id}` records no new event.
 - **ANALYTICS-006-AC10** Hard-deleting a board removes that board's activity events and no event of another board (approved, UD-18).
+- **ANALYTICS-006-AC11** Every activity event's time is a UTC timestamp equal to the time of the request that created it, taken from the same clock reading as the action's other timestamps (`created_at`, `updated_at`, and `completed_at` where they change), so that window boundaries are deterministic under a fixed clock (approved, UD-14).
 
 ### 3.8 User profile (USER)
 
@@ -779,11 +813,17 @@ The `/boards/[id]` page MUST be a Server Component that fetches and displays a b
 - **FRONT-006-AC12** When the page is opened from a notification for a card that is not in the board data, it shows the message "This card is no longer available" and a way back to the board, shows no error toast, and does not fail to render.
 
 ### FRONT-007 Board analytics view
-`/boards/[id]` MUST display the analytics returned by `GET /api/boards/{id}/analytics` (A-10).
+`/boards/[id]` MUST display the analytics returned by `GET /api/boards/{id}/analytics` (A-10) for the current UTC reporting week (approved, UD-14). The page remains a Server Component, and the analytics panel is refreshed from the browser through the same-origin proxy (FRONT-023). The view has no timezone setting and no date-range control.
 
 **Acceptance criteria**
 - **FRONT-007-AC01** The view shows the card count for each column labeled with the column name, the number of cards completed this week, and member activity.
 - **FRONT-007-AC02** If the analytics request fails, the analytics panel shows an error message instead of numbers, and the rest of the board remains visible.
+- **FRONT-007-AC03** The panel labels the reporting period using `window.start` and `window.end` from the response and treats `window.end` as exclusive, so the last displayed day is the day before `window.end`. For `2025-01-13T00:00:00Z` to `2025-01-20T00:00:00Z` it shows "Week of Jan 13–19, 2025 (UTC)". A week that crosses a month shows "Week of Jan 27–Feb 2, 2025 (UTC)", and one that crosses a year shows "Week of Dec 30, 2024–Jan 5, 2025 (UTC)". The dates are computed in UTC and do not change when the browser's time zone is set to Asia/Jakarta or America/Los_Angeles.
+- **FRONT-007-AC04** A count of zero is displayed as "0" for `completed_this_week`, for every `card_count`, and for every `activity_count`. No count is blank or omitted.
+- **FRONT-007-AC05** For a board with no columns, the panel shows the message "This board has no columns yet" in place of the per-column counts, and still shows the reporting period, `completed_this_week` as 0, and the member activity entries.
+- **FRONT-007-AC06** Member activity is shown in the order returned by the API, without sorting in the browser, and each entry shows the member's `name` and `activity_count`. No email address is shown.
+- **FRONT-007-AC07** The analytics view contains no time zone selector, no date input, and no week selector.
+- **FRONT-007-AC08** After a successful card creation, card move, or card deletion, and after a successful Done/Active toggle (FRONT-025-AC15), the panel requests `GET /api/boards/{id}/analytics` again and shows the new response. After a failed mutation it makes no analytics request.
 
 ### FRONT-008 Card search with debounce
 Card search on `/boards/[id]` MUST filter the card titles of the board data already loaded from `GET /api/boards/{id}`, in the browser, and MUST debounce the search input by 300 ms. The scope is the current board only (approved, UD-10). There is no search API endpoint and the search sends no API request (approved, UD-11). The matching rule is A-11.
@@ -1102,9 +1142,14 @@ The backend suite MUST test FLOAT positioning and analytics.
 - **TEST-004-AC02** A test asserts the Card position column type is `Float`.
 - **TEST-004-AC03** A test asserts that the analytics service emits SQL containing `JOIN`.
 - **TEST-004-AC04** Tests cover the `completed_at` rules in CARD-002-AC06, CARD-005-AC07 to AC11, and COLUMN-002-AC08 and AC09, the `is_done` rules in COLUMN-002-AC05 to AC07, and the column model in COLUMN-005-AC01 to AC03.
-- **TEST-004-AC05** Tests cover the activity events in ANALYTICS-006-AC01 to AC08.
+- **TEST-004-AC05** Tests cover the activity events in ANALYTICS-006-AC01 to AC08 and AC11.
 - **TEST-004-AC06** Tests cover BOARD-007-AC01 to AC10.
 - **TEST-004-AC07** Tests cover the `is_done` rules in COLUMN-002-AC11 to AC14: an unchanged or repeated `is_done` leaves every card's `completed_at` unchanged and creates no event or notification, a changed value applies the completion rules in one transaction, and a forced failure leaves the column and its cards unchanged.
+- **TEST-004-AC08** The analytics tests use a frozen server clock and never the real current date. A test asserts the window for these fixed instants: `2025-01-15T12:00:00Z` (a Wednesday), `2025-01-13T00:00:00Z` (a Monday at the start of the week), `2025-01-19T23:59:59.999999Z` (the last instant of a week), and `2025-01-20T00:00:00Z` (the next week). A test run with the process time zone set to `Asia/Jakarta` produces the same windows (ANALYTICS-001-AC04, ANALYTICS-005-AC04).
+- **TEST-004-AC09** Tests cover the completed-card count in ANALYTICS-003-AC01 to AC13: counting, the Monday start inclusion, the next-Monday exclusion, Sunday fractional-second inclusion, week rollover, reopened and recompleted cards, done-to-done moves, done-column toggling, soft-deleted card and column exclusion, the `completed_at` invariant after a sequence of operations, and independence from activity events.
+- **TEST-004-AC10** Tests cover member activity in ANALYTICS-004-AC01 to AC11: boundary inclusion and exclusion, rollover, three distinct moves counting as three, zero counts for current members, inclusion of events of soft-deleted cards, columns, and comments, exclusion of events of other boards, exclusion of non-qualifying actions, members who joined mid-week, and users without a current membership.
+- **TEST-004-AC11** Tests cover the response contract in ANALYTICS-001-AC01 to AC09: the exact keys and value types, the UTC `Z` timestamp format, the ordering of `cards_per_column` and of `member_activity` including ties on `activity_count` and `name`, explicit empty arrays and zero counts for an empty board, the absence of email addresses, HTTP 400 for any query parameter, and the 401 and 404 precedence.
+- **TEST-004-AC12** A test seeds a board with cards in done and active columns, soft-deleted cards, a soft-deleted column, and events of several members and of another board, and asserts the full analytics response (the `window`, every `card_count`, `completed_this_week`, and every `activity_count`) against hand-computed expected values under a frozen clock.
 
 ### TEST-005 Frontend component tests
 The frontend MUST have React Testing Library tests for its components and hooks.
@@ -1120,6 +1165,7 @@ The frontend MUST have React Testing Library tests for its components and hooks.
 - **TEST-005-AC08** Tests cover the Done/Active toggle and the delete control in FRONT-025-AC09 to AC17: visibility by role, the request body, the success state, rollback on failure, the analytics refresh, and a 403 response.
 - **TEST-005-AC09** Tests cover the assignee dropdown in FRONT-011-AC05 to AC13: the displayed assignee, the member options and the "Unassigned" option, the request body for an assignment and an unassignment, the success state, restoring the previous assignee with an error toast on failure, the pending state, keyboard operation, and the absence of assignment controls in `AddCardForm`.
 - **TEST-005-AC10** Tests cover `NotificationBell` in FRONT-016-AC05 to AC14 and `useNotifications` in FRONT-017-AC06: the item content, the read and unread distinction, marking as read, navigation to the board, the "This card is no longer available" state, the absence of comment text, a generic error message, polling with fake timers, and keyboard operation.
+- **TEST-005-AC11** Tests cover the analytics panel in FRONT-007-AC03 to AC08: the week label computed in UTC for a week inside a month, across a month, and across a year, run with the process time zone set to `Asia/Jakarta` and `America/Los_Angeles`, zero counts displayed as 0, the empty-board message, the order of members as returned, the absence of time zone and range controls, and the refresh after card and Done/Active mutations.
 
 ### TEST-006 Playwright suite rules
 Playwright end-to-end tests MUST run against the deployed Vercel frontend.
@@ -1234,7 +1280,7 @@ Deployed services MUST use HTTPS.
 **Project target** (not an existing measured result): the 95th percentile (p95) response time for standard read requests MUST be under 500 ms.
 
 **Acceptance criteria**
-- **NFR-005-AC01** After one warm-up request per endpoint, a run of at least 100 sequential requests to each of `GET /api/boards`, `GET /api/boards/{id}`, `GET /api/cards?assignee=me`, `GET /api/notifications`, and `GET /api/cards/{id}/comments` on the deployed Render API yields a p95 under 500 ms for each.
+- **NFR-005-AC01** After one warm-up request per endpoint, a run of at least 100 sequential requests to each of `GET /api/boards`, `GET /api/boards/{id}`, `GET /api/cards?assignee=me`, `GET /api/notifications`, `GET /api/cards/{id}/comments`, and `GET /api/boards/{id}/analytics` on the deployed Render API yields a p95 under 500 ms for each.
 - **NFR-005-AC02** The measurement procedure and the dataset size used are recorded in the README.
 
 ### NFR-006 Client request rates
@@ -1534,24 +1580,45 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | ANALYTICS-001 | ANALYTICS-001-AC01 | GET /api/boards/{id}/analytics |
 | ANALYTICS-001 | ANALYTICS-001-AC02 | GET /api/boards/{id}/analytics |
 | ANALYTICS-001 | ANALYTICS-001-AC03 | GET /api/boards/{id}/analytics |
+| ANALYTICS-001 | ANALYTICS-001-AC04 | GET /api/boards/{id}/analytics (response schema) |
+| ANALYTICS-001 | ANALYTICS-001-AC05 | GET /api/boards/{id}/analytics (response schema) |
+| ANALYTICS-001 | ANALYTICS-001-AC06 | GET /api/boards/{id}/analytics (response schema) |
+| ANALYTICS-001 | ANALYTICS-001-AC07 | GET /api/boards/{id}/analytics (response schema) |
+| ANALYTICS-001 | ANALYTICS-001-AC08 | GET /api/boards/{id}/analytics (response schema) |
+| ANALYTICS-001 | ANALYTICS-001-AC09 | GET /api/boards/{id}/analytics (query validation) |
 | ANALYTICS-002 | ANALYTICS-002-AC01 | Analytics service (service layer) |
 | ANALYTICS-002 | ANALYTICS-002-AC02 | Analytics service (service layer) |
 | ANALYTICS-002 | ANALYTICS-002-AC03 | Analytics service (service layer) |
 | ANALYTICS-002 | ANALYTICS-002-AC04 | Analytics service (service layer) |
+| ANALYTICS-002 | ANALYTICS-002-AC05 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC01 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC02 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC03 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC04 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC05 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC06 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC07 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC08 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC09 | Card and column service layer (completion invariant) |
+| ANALYTICS-003 | ANALYTICS-003-AC10 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC11 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC12 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC13 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC01 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC02 | Activity recording (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC03 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC04 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC05 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC06 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC07 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC08 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC09 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC10 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC11 | Analytics service (service layer) |
 | ANALYTICS-005 | ANALYTICS-005-AC01 | Analytics service module and route handler |
 | ANALYTICS-005 | ANALYTICS-005-AC02 | Analytics service (SQLAlchemy join queries) |
 | ANALYTICS-005 | ANALYTICS-005-AC03 | Analytics service (SQLAlchemy join queries) |
+| ANALYTICS-005 | ANALYTICS-005-AC04 | Analytics service (window computation and clock) |
 | ANALYTICS-006 | ANALYTICS-006-AC01 | POST /api/columns/{id}/cards (activity recording in service layer) |
 | ANALYTICS-006 | ANALYTICS-006-AC02 | PATCH /api/cards/{id}/position (activity recording in service layer) |
 | ANALYTICS-006 | ANALYTICS-006-AC03 | POST /api/cards/{id}/comments (activity recording in service layer) |
@@ -1562,6 +1629,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | ANALYTICS-006 | ANALYTICS-006-AC08 | PATCH /api/comments/{id} and DELETE /api/comments/{id} (no activity recording) |
 | ANALYTICS-006 | ANALYTICS-006-AC09 | Activity-event table (retention) and DELETE /api/columns/{id} |
 | ANALYTICS-006 | ANALYTICS-006-AC10 | DELETE /api/boards/{id} (service layer deletion strategy) |
+| ANALYTICS-006 | ANALYTICS-006-AC11 | Activity recording (service layer) and clock |
 | USER-001 | USER-001-AC01 | GET /api/users/me |
 | USER-001 | USER-001-AC02 | GET /api/users/me |
 | USER-001 | USER-001-AC03 | GET /api/users/me |
@@ -1619,6 +1687,12 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-006 | FRONT-006-AC12 | Page /boards/[id] (board view container) |
 | FRONT-007 | FRONT-007-AC01 | Page /boards/[id] (analytics panel) |
 | FRONT-007 | FRONT-007-AC02 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC03 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC04 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC05 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC06 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC07 | Page /boards/[id] (analytics panel) |
+| FRONT-007 | FRONT-007-AC08 | Page /boards/[id] (analytics panel) |
 | FRONT-008 | FRONT-008-AC01 | Card search filter (Client Component on /boards/[id]) |
 | FRONT-008 | FRONT-008-AC02 | Card search filter (Client Component on /boards/[id]) |
 | FRONT-008 | FRONT-008-AC03 | Card search filter (Client Component on /boards/[id]) |
@@ -1802,6 +1876,11 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-004 | TEST-004-AC05 | Backend pytest suite (activity events) |
 | TEST-004 | TEST-004-AC06 | Backend pytest suite (membership extension) |
 | TEST-004 | TEST-004-AC07 | Backend pytest suite (is_done idempotency) |
+| TEST-004 | TEST-004-AC08 | Backend pytest suite (analytics window and clock) |
+| TEST-004 | TEST-004-AC09 | Backend pytest suite (completed-this-week analytics) |
+| TEST-004 | TEST-004-AC10 | Backend pytest suite (member activity analytics) |
+| TEST-004 | TEST-004-AC11 | Backend pytest suite (analytics response contract) |
+| TEST-004 | TEST-004-AC12 | Backend pytest suite (analytics end-to-end data set) |
 | TEST-005 | TEST-005-AC01 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC02 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC03 | Frontend test suite (card search) |
@@ -1812,6 +1891,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-005 | TEST-005-AC08 | Frontend test suite (ColumnHeader and board view) |
 | TEST-005 | TEST-005-AC09 | Frontend test suite (CardDetailModal and AddCardForm) |
 | TEST-005 | TEST-005-AC10 | Frontend test suite (NotificationBell and useNotifications) |
+| TEST-005 | TEST-005-AC11 | Frontend test suite (analytics panel) |
 | TEST-006 | TEST-006-AC01 | Playwright configuration |
 | TEST-006 | TEST-006-AC02 | Playwright test suite |
 | TEST-006 | TEST-006-AC03 | Playwright test suite |
@@ -1924,11 +2004,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Rationale:** `NotificationBell` must show an unread count that covers all pages, not only the first page.
 - **Affects:** NOTIF-001, FRONT-016, FRONT-017.
 
-### UD-14 Definition of "this week"
-- **Proposal:** Calendar week from Monday 00:00 to Sunday 23:59:59 in UTC. Member activity counts use the same window (approved, A-14), so the boundary chosen here applies to both. The calendar boundary stated here is a proposal only.
-- **Rationale:** A fixed, testable boundary that does not depend on each user's time zone.
-- **Affects:** ANALYTICS-003, ANALYTICS-004.
-
 ### UD-15 Coverage targets
 - **Proposal:** At least 80% line coverage for backend services and routes, and for frontend components and hooks.
 - **Rationale:** A common, measurable threshold that is achievable for a project of this size.
@@ -2031,21 +2106,33 @@ These decisions were approved by the human reviewer. They are requirements, not 
   - A card stores a nullable `completed_at` timestamp.
   - Moving a card from a non-done column into a done column sets `completed_at` to the time of the move.
   - Moving a card from a done column into a non-done column sets `completed_at` to null.
-  - When a card leaves a done column and enters a done column again, `completed_at` is overwritten with the time of the later entry. Earlier completions remain visible in the activity events (UD-13).
-  - "Cards completed this week" counts non-deleted cards whose `completed_at` falls inside the week defined by UD-14.
+  - When a card leaves a done column and enters a done column again, `completed_at` is overwritten with the time of the later entry.
+  - `completed_at` represents only the card's current completion state. Earlier timestamps are cleared or overwritten by later transitions, no completion history is stored, and historical completion counts cannot be reconstructed reliably from the activity events, because the three approved event types do not record whether a column was done at the time. The activity events remain available for the separately approved activity reporting (UD-13).
+  - "Cards completed this week" counts non-deleted cards in non-deleted done columns whose current `completed_at` falls inside the reporting window of the approved UD-14, each card at most once.
 - **Rationale:** A card's current column alone cannot show when the card was completed. A stored timestamp written at the moment of the move gives a reliable completion time and handles reopened cards.
 - **Governs:** COLUMN-002, CARD-001, CARD-002, CARD-005, BOARD-003, ANALYTICS-003.
-- **Still open:** The week definition (UD-14). The treatment of cards in a deleted column is approved in UD-23, and the remaining completion-timestamp rules are in the approved A-13.
+- **Still open:** Nothing. The reporting window is approved in UD-14, the treatment of cards in a deleted column in UD-23, and the remaining completion-timestamp rules in A-13.
 
 ### UD-13 Member activity events [Approved]
 - **Decision:**
   - The service layer appends one row to an auditable activity-event table for each card creation, each card movement to another column, and each comment creation.
   - Each row stores the board, the acting user, the event type, the card, and the event time. A movement row also stores the source and destination columns.
-  - A member's activity is the count of that member's events for the board. A member with no events has a count of 0.
+  - A member's activity is the count of that member's events for the board inside the reporting window of the approved UD-14. A current member with no qualifying events has a count of 0.
   - Analytics are calculated with SQLAlchemy joins in the service layer.
 - **Rationale:** Current data cannot show who did what and when. An append-only log written at the time of each action gives a reliable count and keeps boards separate.
 - **Governs:** ANALYTICS-004, ANALYTICS-005, ANALYTICS-006.
-- **Still open:** The time window for activity counts follows UD-14. Further rules are in the approved A-13 and A-14.
+- **Still open:** Nothing. The reporting window is approved in UD-14, and further rules are in the approved A-13 and A-14.
+
+### UD-14 Analytics reporting window [Approved]
+- **Decision:**
+  - **Window.** The reporting week starts on Monday at 00:00:00 UTC and ends at the following Monday at 00:00:00 UTC. The interval is half-open: `window_start <= timestamp < window_end`. Sunday 23:59:59 is not used as the end boundary.
+  - **Time zone and range.** Reporting uses UTC and no user or board time zone setting exists. The analytics API reports the current UTC calendar week only and supports no custom date ranges. Any query parameter on `GET /api/boards/{id}/analytics` returns HTTP 400. No new endpoint is added.
+  - **Shared window.** `completed_this_week` and member activity use the same window, and the response states it explicitly as `window.start` and `window.end`.
+  - **Response.** `data` contains `window` (`start`, `end`, in ISO 8601 UTC with `Z`), `cards_per_column` (entries with `column_id`, `name`, and `card_count`, ordered by column position), `completed_this_week` (an integer), and `member_activity` (entries with `user_id`, `name`, and `activity_count`, ordered by `activity_count` descending, then `name` ascending, then `user_id` ascending). Empty arrays and zero counts are returned explicitly and never omitted or null. No email address or other private profile field is exposed.
+  - **Completed this week.** The number of non-soft-deleted cards in non-soft-deleted done columns whose current `completed_at` is inside the window, each card at most once. The count uses the current `completed_at`, not a reconstruction from activity events, and no completion history is stored. For a non-deleted card in a non-deleted column, `completed_at` is non-null if and only if the column is done. A card in a column newly marked done counts as completed this week even if it was created months earlier, and a card completed twice counts once with its latest `completed_at`. The lifecycle of UD-12 and A-13 is unchanged.
+  - **Member activity.** A member's `activity_count` is the number of their `card_created`, `card_moved`, and `comment_created` events for the board whose event time is inside the window. Each event counts once, three moves count as three, other boards are excluded, and events of cards, columns, or comments that were later soft-deleted or deleted are included. Actions that create no approved event type are not counted, and there is no per-type breakdown. The response has one entry for each current board member (0 when no qualifying events), counts a member who joined during the week for all their qualifying events of that week without proration, and has no entry for former members.
+- **Rationale:** A fixed UTC week with a half-open interval is deterministic and has no gap or overlap at the boundaries. Reporting only the current week avoids promising history that `completed_at` cannot provide, because it is cleared or overwritten by later transitions. Counting soft-deleted resources' events keeps member activity an audit of what members did, while the completed count describes the board's current state.
+- **Governs:** ANALYTICS-001 to ANALYTICS-006, FRONT-007, FRONT-025, NFR-005, TEST-004, TEST-005, UD-12, UD-13, A-14, Section 2.3.
 
 ### UD-18 Soft-delete scope [Approved]
 - **Decision:**
@@ -2103,7 +2190,7 @@ These decisions were approved by the human reviewer. They are requirements, not 
 ### A-14 Comment events, activity window, duplicate membership, and board role [Approved]
 - **Decision:**
   1. Editing or deleting a comment does not create a member activity event.
-  2. Member activity uses the reporting window defined by UD-14. UD-14 remains unresolved, so the calendar boundary of that window is not chosen.
+  2. Member activity uses the reporting window defined by the approved UD-14: the current UTC week from Monday 00:00:00 UTC (inclusive) to the following Monday 00:00:00 UTC (exclusive).
   3. Adding a user who is already a member of the same board returns HTTP 409.
   4. `GET /api/boards/{id}` includes the authenticated requester's board role, which is `administrator` or `member`.
 - **Governs:** ANALYTICS-004, ANALYTICS-006, BOARD-003, BOARD-007, FRONT-025, Section 2.3.
@@ -2128,17 +2215,17 @@ These decisions were approved by the human reviewer. They are requirements, not 
 | CARD | Card management and positioning | 7 | 62 |
 | COMMENT | Comments | 4 | 30 |
 | NOTIF | Notifications | 3 | 36 |
-| ANALYTICS | Board analytics | 6 | 31 |
+| ANALYTICS | Board analytics | 6 | 53 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 176 |
+| FRONT | Frontend pages and components | 26 | 182 |
 | API | API client and response format | 7 | 26 |
-| TEST | Testing | 11 | 84 |
+| TEST | Testing | 11 | 90 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **93** | **598** |
+| **Total** | | **93** | **632** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 11 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
-- Unresolved design decisions (all [Proposed, not approved]): 13.
-- Acceptance criteria blocked by an unresolved decision: 7. Blocking decisions: UD-14: 7.
+- Approved decisions: 12 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-14, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 12.
+- Acceptance criteria blocked by an unresolved decision: 0. Blocking decisions: none.
