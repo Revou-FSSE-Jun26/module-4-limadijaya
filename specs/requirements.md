@@ -27,9 +27,9 @@ RevoTask lets authenticated users manage boards, columns, and cards. Cards can b
 ### 1.4 Derived assumptions (to confirm)
 These inferences are embedded in acceptance criteria. They are not open questions, but they are not stated verbatim in the brief. Confirm or correct them.
 
-- **A-01** A new column or card is appended after the existing ones in its parent, with a positive float position greater than every existing sibling.
+- **A-01** A new column or card is appended after the existing ones in its parent, with a positive float position greater than every non-deleted sibling.
 - **A-02** `GET /api/boards/{id}` returns the board with its columns and non-deleted cards, because the required endpoint set has no separate list endpoints for columns or cards.
-- **A-03** `DELETE /api/cards/{id}` is a soft delete that sets `deleted_at`. This is implied by the required `deleted_at` field on Card. Other entities are covered by UD-18.
+- **A-03** `DELETE /api/cards/{id}` is a soft delete that sets `deleted_at`. This is implied by the required `deleted_at` field on Card. The deletion scope for the other entities (boards, columns, comments) is approved in UD-18 and UD-23.
 - **A-04** Field names in request bodies: board `name`, column `name`, card `title`, comment `content`, user `name`, `email`, and `password`. Card position requests use `column_id` and `order`.
 - **A-05** Comments are listed by `created_at` ascending. Notifications are listed newest first.
 - **A-06** A request body containing a field that the endpoint does not accept is rejected with HTTP 400. This includes `password` on `PATCH /api/users/me`.
@@ -37,7 +37,7 @@ These inferences are embedded in acceptance criteria. They are not open question
 - **A-08** A successful login redirects to `/`.
 - **A-09** A card assignee must be a member of the card's board.
 - **A-10** Board analytics are displayed within `/boards/[id]`, and columns can be reordered by drag-and-drop on that page.
-A-11 (card search matching), A-12 (page architecture), A-13 (completion timestamps and activity behavior), and A-14 (comment events, activity window, duplicate membership, and board role) are approved. They are listed in Section 8.2 and keep their IDs. A-01 to A-10 remain derived assumptions to confirm.
+A-11 (card search matching), A-12 (page architecture), A-13 (completion timestamps and activity behavior), A-14 (comment events, activity window, duplicate membership, and board role), and A-15 (consequences of soft deletion) are approved. They are listed in Section 8.2 and keep their IDs. UD-18 and UD-23 (deletion strategy) are also approved. A-01 to A-10 remain derived assumptions to confirm.
 
 ## 2. System Overview
 
@@ -73,6 +73,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 403 | Authenticated non-owner edits or deletes another user's comment on a board they can access | Approved |
 | 201 | Comment created | Approved |
 | 400 | Comment created with missing content | Approved |
+| 404 | An operation targets a soft-deleted column or a soft-deleted card (the rule for their comments is in the approved A-15) | Approved (UD-18, UD-23) |
 | 409 | A user who is already a member of the board is added to that board again | Approved (A-14) |
 | 404 | An email that belongs to no registered user is added to a board | Approved (A-13) |
 | 200 | Successful read, update, or delete | Proposed, not approved (UD-19) |
@@ -189,6 +190,7 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-003-AC04** A request for a board ID that does not exist returns HTTP 404 with the same `error` message as BOARD-003-AC03.
 - **BOARD-003-AC05** Each column in the response includes a boolean `is_done`.
 - **BOARD-003-AC06** The response includes the requesting user's role on the board, which is `administrator` for a Board Administrator and `member` for a Board Member (A-14).
+- **BOARD-003-AC07** Columns with a non-null `deleted_at` are absent from the response, and so are all cards that belong to them (approved, UD-18).
 
 ### BOARD-004 Update board
 `PATCH /api/boards/{id}` MUST update a board's name.
@@ -200,12 +202,17 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-004-AC04** **Blocked by UD-05.** If the operation is designated administrator-only, a member who is not an administrator receives HTTP 403 and the name is unchanged.
 
 ### BOARD-005 Delete board
-`DELETE /api/boards/{id}` MUST delete a board.
+`DELETE /api/boards/{id}` MUST hard-delete a board (approved, UD-18). The same transaction MUST remove every dependent row: memberships, columns (including soft-deleted ones), cards (including soft-deleted ones), comments, notifications that refer to the board or its cards, and activity events of the board. Users are not deleted. The deletion order or foreign-key strategy MUST be defined explicitly in the schema or the service, and MUST NOT depend on database defaults.
 
 **Acceptance criteria**
 - **BOARD-005-AC01** An authorized user receives HTTP 200, and a following `GET /api/boards/{id}` by that user returns HTTP 404.
 - **BOARD-005-AC02** An authenticated user who is not a member receives HTTP 404 and the board still exists.
 - **BOARD-005-AC03** **Blocked by UD-05.** If the operation is designated administrator-only, a member who is not an administrator receives HTTP 403 and the board still exists.
+- **BOARD-005-AC04** For a board that holds every kind of dependent row, the request returns HTTP 200, and afterward no membership, column, card, comment, notification, or activity-event row that belongs to the board remains in the database. The dependent rows include columns and cards that were already soft-deleted.
+- **BOARD-005-AC05** The request does not fail with a foreign-key violation or HTTP 500 when the board contains soft-deleted columns, soft-deleted cards, comments, notifications, and activity events.
+- **BOARD-005-AC06** The deletion runs in one transaction. When a failure is forced after some dependent rows were removed, the board and all its dependent rows are unchanged afterward.
+- **BOARD-005-AC07** The deletion removes no row that belongs to another board and no row in `users`.
+- **BOARD-005-AC08** The deletion strategy is explicit: either every foreign key that leads to `boards` declares its delete behavior in a Flask-Migrate migration, or the service deletes the dependent rows in a documented order. A test that deletes a fully populated board passes against a database created by `flask db upgrade`.
 
 ### BOARD-006 Board-specific authorization
 Membership and administrator status MUST be evaluated per board. The same check MUST apply to every board-scoped endpoint.
@@ -237,7 +244,7 @@ Membership and administrator status MUST be evaluated per board. The same check 
 
 **Acceptance criteria**
 - **COLUMN-001-AC01** Given a non-empty `name`, the request returns HTTP 201 and `data` contains a UUID `id`, the `name`, and a positive float position.
-- **COLUMN-001-AC02** The new column's position is greater than the position of every existing column in the board (A-01).
+- **COLUMN-001-AC02** The new column's position is greater than the position of every non-deleted column in the board (A-01).
 - **COLUMN-001-AC03** A missing or empty `name` returns HTTP 400 and no column is created.
 - **COLUMN-001-AC04** A non-member of the board receives HTTP 404.
 
@@ -254,14 +261,24 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-002-AC07** A non-boolean `is_done` value returns HTTP 400 and the column is unchanged.
 - **COLUMN-002-AC08** When an administrator marks a column done, each non-deleted card already in the column gets `completed_at` equal to the time of the request (A-13).
 - **COLUMN-002-AC09** When an administrator unmarks a done column, `completed_at` is set to null for each card in the column (A-13).
+- **COLUMN-002-AC10** A request for a soft-deleted column, with `name` or `is_done`, returns HTTP 404 and the column is unchanged (approved, UD-18).
 
 ### COLUMN-003 Delete column
-`DELETE /api/columns/{id}` MUST delete a column. The treatment of its cards is unresolved (UD-23).
+`DELETE /api/columns/{id}` MUST soft-delete a column and all of its currently active cards in one database transaction (approved, UD-18 and UD-23). The column and the affected cards MUST receive the same UTC `deleted_at` timestamp. The column row and the foreign key from each card to its column MUST be preserved: the column is not hard-deleted and its cards are not cascade-deleted. No endpoint restores a soft-deleted column or card.
 
 **Acceptance criteria**
 - **COLUMN-003-AC01** A member receives HTTP 200, and `GET /api/boards/{id}` no longer lists the column.
 - **COLUMN-003-AC02** A non-member of the column's board receives HTTP 404 and the column still exists.
-- **COLUMN-003-AC03** **Blocked by UD-23.** Deleting a column that contains cards produces the outcome approved in UD-23.
+- **COLUMN-003-AC03** Deleting a column that contains 3 non-deleted cards returns HTTP 200, and afterward the column row and all 3 card rows still exist with a non-null `deleted_at`.
+- **COLUMN-003-AC04** The column and the affected cards have identical `deleted_at` values, and the value is a UTC timestamp.
+- **COLUMN-003-AC05** A card that was already soft-deleted before the column was deleted keeps its original `deleted_at` value. A card in another column of the same board is unchanged.
+- **COLUMN-003-AC06** After deletion, every card of the column still has its original `column_id`, and the column row it references still exists. No card or column row is removed from the database.
+- **COLUMN-003-AC07** The deletion is one transaction. When a failure is forced after the column was marked deleted and before the cards were marked, the column and all its cards are unchanged afterward.
+- **COLUMN-003-AC08** After deletion, `GET /api/boards/{id}` lists neither the column nor any of its cards, and `GET /api/cards?assignee=me` lists none of its cards.
+- **COLUMN-003-AC09** Sending `DELETE /api/columns/{id}` for an already soft-deleted column returns HTTP 404 and no `deleted_at` value changes.
+- **COLUMN-003-AC10** After deletion, `PATCH /api/columns/{id}` (including `is_done`), `POST /api/columns/{id}/cards`, and any card operation on its cards return HTTP 404, and nothing changes.
+- **COLUMN-003-AC11** After deletion, the `completed_at` and assignee values of the column's cards are unchanged (approved, A-15), and no activity event is created or removed.
+- **COLUMN-003-AC12** The URL map contains no route that restores or undeletes a column or a card.
 
 ### COLUMN-004 Reorder columns
 `PATCH /api/boards/{id}/columns/reorder` MUST persist a new column order using positive FLOAT order values. The request and response shape is unresolved (UD-20).
@@ -272,19 +289,23 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-004-AC03** A request that references a column ID not belonging to the board returns HTTP 400 and no order value changes.
 - **COLUMN-004-AC04** A non-member of the board receives HTTP 404.
 - **COLUMN-004-AC05** The Column position attribute is declared as a SQLAlchemy `db.Float` column.
+- **COLUMN-004-AC06** A request that lists a soft-deleted column returns HTTP 400 and no order value changes (approved, A-15). The `order` values of soft-deleted columns are never modified.
 
 ### COLUMN-005 Column data model
-The Column model MUST define a Boolean `is_done` field that marks a done (completed) column (approved, UD-12 and A-13).
+The Column model MUST define a Boolean `is_done` field that marks a done (completed) column (approved, UD-12 and A-13). It MUST also define a nullable UTC `deleted_at` timestamp for soft deletion (approved, UD-18).
 
 **Acceptance criteria**
 - **COLUMN-005-AC01** Introspection of the Column model shows `is_done` is a Boolean column that is not nullable and has a default of false.
 - **COLUMN-005-AC02** A column created through `POST /api/boards/{id}/columns` has `is_done` equal to false in the response `data`.
 - **COLUMN-005-AC03** A Flask-Migrate migration adds `is_done`, `flask db upgrade` on an empty database completes without error, and on a database with existing columns every existing column gets `is_done` equal to false.
+- **COLUMN-005-AC04** Introspection of the Column model shows `deleted_at` is a nullable, timezone-aware date-time column, and a newly created column has `deleted_at` equal to null.
+- **COLUMN-005-AC05** A Flask-Migrate migration adds `deleted_at`, `flask db upgrade` completes without error, and on a database with existing columns every existing column gets `deleted_at` equal to null.
+- **COLUMN-005-AC06** No column response includes `deleted_at` as a non-null value, because soft-deleted columns are never returned by any endpoint.
 
 ### 3.4 Card management and positioning (CARD)
 
 ### CARD-001 Card data model
-The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `deleted_at`, a position stored with `db.Column(db.Float)`, and a nullable `completed_at` timestamp (approved, UD-12).
+The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nullable UTC `deleted_at`, a position stored with `db.Column(db.Float)`, a nullable `completed_at` timestamp (approved, UD-12), and a non-null foreign key `column_id` that references the Column model (approved, UD-23). Cards are soft-deleted (approved, UD-18).
 
 **Acceptance criteria**
 - **CARD-001-AC01** A newly created card has a primary key that parses as a valid UUID, and the key is generated without client input.
@@ -294,17 +315,21 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **CARD-001-AC05** Introspection of the Card model shows the position column is a SQLAlchemy `Float` type declared with `db.Column(db.Float)`.
 - **CARD-001-AC06** A Flask-Migrate migration creates the card table with these columns, and `flask db upgrade` on an empty database completes without error.
 - **CARD-001-AC07** Introspection of the Card model shows `completed_at` is a nullable date-time column, and a card created in a non-done column has `completed_at` equal to null.
+- **CARD-001-AC08** Introspection of the Card model shows `deleted_at` is a nullable, timezone-aware date-time column.
+- **CARD-001-AC09** Introspection of the database created by `flask db upgrade` shows a non-null foreign key from the card's `column_id` to the Column model's primary key.
+- **CARD-001-AC10** After any sequence of the endpoints in Section 3.0, no card with a null `deleted_at` references a column with a non-null `deleted_at`.
 
 ### CARD-002 Create card
 `POST /api/columns/{id}/cards` MUST create a card in the column.
 
 **Acceptance criteria**
 - **CARD-002-AC01** Given a non-empty `title`, the request returns HTTP 201 and `data` contains a UUID `id`, the `title`, the column ID, and a positive float position.
-- **CARD-002-AC02** The new card's position is greater than the position of every existing card in the column (A-01).
+- **CARD-002-AC02** The new card's position is greater than the position of every non-deleted card in the column (A-01).
 - **CARD-002-AC03** A missing or empty `title` returns HTTP 400 and no card is created.
 - **CARD-002-AC04** A non-member of the column's board receives HTTP 404.
 - **CARD-002-AC05** A column ID that does not exist returns HTTP 404.
 - **CARD-002-AC06** A card created in a done column has `completed_at` equal to its creation time (A-13).
+- **CARD-002-AC07** The ID of a soft-deleted column returns HTTP 404 and no card is created (approved, UD-18).
 
 ### CARD-003 Update card
 `PATCH /api/cards/{id}` MUST update card details, including the assignee. Additional card fields are unresolved (UD-07).
@@ -316,15 +341,20 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **CARD-003-AC04** Assigning the card to a user who is not a member of the card's board returns HTTP 400 and the assignee is unchanged.
 - **CARD-003-AC05** A request body containing `id`, `created_at`, or `deleted_at` returns HTTP 400 and no field changes.
 - **CARD-003-AC06** A non-member of the card's board receives HTTP 404.
+- **CARD-003-AC07** A request for a soft-deleted card returns HTTP 404 and the card is unchanged (approved, UD-18).
 
 ### CARD-004 Delete card
-`DELETE /api/cards/{id}` MUST remove a card from all views by setting `deleted_at` (A-03).
+`DELETE /api/cards/{id}` MUST remove a card from all views by setting `deleted_at` to the UTC time of the request (approved, UD-18). The card row, its `column_id`, its `completed_at`, its comments, and its activity events are kept. No endpoint restores a soft-deleted card.
 
 **Acceptance criteria**
 - **CARD-004-AC01** A member receives HTTP 200, and `GET /api/boards/{id}` no longer lists the card.
 - **CARD-004-AC02** After deletion, the card row still exists in the database with a non-null `deleted_at`.
 - **CARD-004-AC03** After deletion, the card is absent from `GET /api/cards?assignee=me`.
 - **CARD-004-AC04** A non-member of the card's board receives HTTP 404 and the card is unchanged.
+- **CARD-004-AC05** After deletion, the card's `deleted_at` is a UTC timestamp equal to the time of the request, and its `column_id`, `completed_at`, and `assignee` values are unchanged.
+- **CARD-004-AC06** Sending `DELETE /api/cards/{id}` for an already soft-deleted card returns HTTP 404 and its `deleted_at` is unchanged.
+- **CARD-004-AC07** After deletion, the card's comments still exist in the database, and `PATCH /api/cards/{id}`, `PATCH /api/cards/{id}/position`, and the card's comment endpoints return HTTP 404 (approved, A-15).
+- **CARD-004-AC08** A successful `DELETE /api/cards/{id}` records no activity event and removes none.
 
 ### CARD-005 Move card (position update)
 `PATCH /api/cards/{id}/position` MUST move a card to a column and position. Positions MUST be positive float values.
@@ -341,6 +371,8 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **CARD-005-AC09** Moving a card from a done column into a non-done column sets `completed_at` to null.
 - **CARD-005-AC10** After a card leaves a done column and enters a done column again, `completed_at` equals the time of the second entry and is later than its previous value.
 - **CARD-005-AC11** Reordering a card within the same column leaves `completed_at` unchanged.
+- **CARD-005-AC12** A request for a soft-deleted card returns HTTP 404 and the card is unchanged (approved, UD-18).
+- **CARD-005-AC13** A `column_id` that identifies a soft-deleted column on the card's board returns HTTP 400 and the card is unchanged (approved, A-15).
 
 ### CARD-006 CardPositionSchema
 `CardPositionSchema` (Marshmallow) MUST validate that `column_id` is a UUID and `order` is a positive float.
@@ -359,6 +391,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **CARD-007-AC03** Each card in `data` includes the name of its board.
 - **CARD-007-AC04** A user with no assigned cards receives HTTP 200 and an empty list.
 - **CARD-007-AC05** An `assignee` value other than `me`, or a missing `assignee` parameter, returns HTTP 400.
+- **CARD-007-AC06** A card assigned to the user is absent from `data` when it was soft-deleted directly or when its column was soft-deleted.
 
 ### 3.5 Comments (COMMENT)
 
@@ -371,6 +404,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **COMMENT-001-AC03** A request with empty or whitespace-only `content` returns HTTP 400 and no comment is created.
 - **COMMENT-001-AC04** A request with no token returns HTTP 401.
 - **COMMENT-001-AC05** A non-member of the card's board receives HTTP 404 and no comment is created.
+- **COMMENT-001-AC06** A request for a soft-deleted card returns HTTP 404, no comment is created, and no activity event is recorded (approved, A-15).
 
 ### COMMENT-002 List comments
 `GET /api/cards/{id}/comments` MUST return a card's comments to the board's members.
@@ -380,6 +414,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **COMMENT-002-AC02** A request with no token returns HTTP 401.
 - **COMMENT-002-AC03** A non-member of the card's board receives HTTP 404.
 - **COMMENT-002-AC04** A card ID that does not exist returns HTTP 404.
+- **COMMENT-002-AC05** A soft-deleted card returns HTTP 404 and no comments (approved, A-15).
 
 ### COMMENT-003 Edit comment (owner only)
 `PATCH /api/comments/{id}` MUST allow only the comment owner to edit a comment.
@@ -391,6 +426,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **COMMENT-003-AC04** A request with no token returns HTTP 401.
 - **COMMENT-003-AC05** The owner sending empty or missing `content` receives HTTP 400 and the content is unchanged.
 - **COMMENT-003-AC06** A user who is not a member of the comment's board receives HTTP 404.
+- **COMMENT-003-AC07** The owner of a comment whose card is soft-deleted receives HTTP 404 and the content is unchanged (approved, A-15).
 
 ### COMMENT-004 Delete comment (owner only)
 `DELETE /api/comments/{id}` MUST allow only the comment owner to delete a comment.
@@ -401,6 +437,8 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, `dele
 - **COMMENT-004-AC03** A Board Administrator who is not the comment owner receives HTTP 403 and the comment still exists.
 - **COMMENT-004-AC04** A request with no token returns HTTP 401.
 - **COMMENT-004-AC05** A comment ID that does not exist returns HTTP 404.
+- **COMMENT-004-AC06** After the owner deletes a comment, the comment row no longer exists in the database (hard delete, approved, UD-18), and the activity events that reference it remain.
+- **COMMENT-004-AC07** The owner of a comment whose card is soft-deleted receives HTTP 404 and the comment still exists (approved, A-15).
 
 ### 3.6 Notifications (NOTIF)
 
@@ -447,6 +485,8 @@ The analytics MUST include the number of cards in each column.
 **Acceptance criteria**
 - **ANALYTICS-002-AC01** For a board with a column holding 3 cards and a column holding 0 cards, the response reports 3 and 0 for those columns.
 - **ANALYTICS-002-AC02** Cards with a non-null `deleted_at` are not counted.
+- **ANALYTICS-002-AC03** Soft-deleted columns are absent from the per-column result, and cards that were soft-deleted with their column are not counted anywhere (approved, UD-18 and UD-23).
+- **ANALYTICS-002-AC04** After a column holding 3 cards is deleted, the response lists one column fewer and the total number of counted cards drops by 3.
 
 ### ANALYTICS-003 Cards completed this week
 The analytics MUST include the number of cards completed this week. A card's current column alone MUST NOT be used as proof that it was completed during the current week. The completion time MUST come from a recorded completion timestamp. "Completed" is defined by the approved UD-12: a card is completed while it is in a done column, and `completed_at` records when it entered. The definition of "this week" is unresolved (UD-14).
@@ -456,6 +496,7 @@ The analytics MUST include the number of cards completed this week. A card's cur
 - **ANALYTICS-003-AC02** **Blocked by UD-14.** A card that was completed before the week and is still in a done column is not counted.
 - **ANALYTICS-003-AC03** **Blocked by UD-14.** A card completed this week and then moved out of every done column is not counted.
 - **ANALYTICS-003-AC04** **Blocked by UD-14.** A card completed this week and then soft-deleted is not counted.
+- **ANALYTICS-003-AC05** **Blocked by UD-14.** A card completed this week in a done column that is then soft-deleted is not counted, and neither is any card of that column.
 
 ### ANALYTICS-004 Member activity
 The analytics MUST include member activity. Activity MUST be taken from the activity-event records (ANALYTICS-006) and not inferred from current data. Member activity counts card creation, card movement, and comments (approved, UD-13). Member activity uses the reporting window defined by UD-14 (approved, A-14). The calendar boundary of that window is unresolved (UD-14).
@@ -466,6 +507,7 @@ The analytics MUST include member activity. Activity MUST be taken from the acti
 - **ANALYTICS-004-AC03** **Blocked by UD-14.** Events recorded before the activity window defined in UD-14 are not counted.
 - **ANALYTICS-004-AC04** Events performed on another board are not counted for this board.
 - **ANALYTICS-004-AC05** **Blocked by UD-14.** The window used to count member activity is the same window used to count cards completed this week (approved, A-14).
+- **ANALYTICS-004-AC06** After a card, or the column that holds it, is soft-deleted, the activity counts of the board's members are unchanged, because the events of the deleted card and column still count (approved, UD-13 and A-13).
 
 ### ANALYTICS-005 Implementation constraint
 Analytics MUST be calculated with SQLAlchemy joins in the service layer.
@@ -476,7 +518,7 @@ Analytics MUST be calculated with SQLAlchemy joins in the service layer.
 - **ANALYTICS-005-AC03** Recording the SQL for each of the three metrics separately (cards per column, cards completed this week, member activity) finds a `JOIN` in the statement for each metric.
 
 ### ANALYTICS-006 Activity-event recording
-The service layer MUST record an append-only activity event, in the same database transaction as the action, for each card creation, each card movement to another column, and each comment creation (approved, UD-13). The event type names below are working names. Further approved behavior is in A-13 and A-14.
+The service layer MUST record an append-only activity event, in the same database transaction as the action, for each card creation, each card movement to another column, and each comment creation (approved, UD-13). The event type names below are working names. Events MUST survive the soft-deletion of their column or card and the deletion of their comment. They are removed only when their board is hard-deleted (approved, UD-18). Further approved behavior is in A-13 and A-14.
 
 **Acceptance criteria**
 - **ANALYTICS-006-AC01** A successful `POST /api/columns/{id}/cards` records exactly one card-created event with the board, the acting user, the card, and the event time.
@@ -487,6 +529,8 @@ The service layer MUST record an append-only activity event, in the same databas
 - **ANALYTICS-006-AC06** Every event row has a non-null board, acting user, event type, and event time. A card-moved event also has non-null source and destination columns.
 - **ANALYTICS-006-AC07** After a card is soft-deleted and after a comment is deleted, the events that reference them remain readable in the activity-event table and still count toward the acting member's activity.
 - **ANALYTICS-006-AC08** A successful `PATCH /api/comments/{id}` and a successful `DELETE /api/comments/{id}` each record no activity event, and the acting member's activity count is unchanged (approved, A-14).
+- **ANALYTICS-006-AC09** After a column is soft-deleted together with its cards, every activity event that references the column or its cards still exists with unchanged values and remains readable. A successful `DELETE /api/columns/{id}` records no new event.
+- **ANALYTICS-006-AC10** Hard-deleting a board removes that board's activity events and no event of another board (approved, UD-18).
 
 ### 3.8 User profile (USER)
 
@@ -639,6 +683,8 @@ The `/boards/[id]` page MUST be a Server Component that fetches and displays a b
 - **FRONT-006-AC06** Renaming a column through its `ColumnHeader` calls `PATCH /api/columns/{id}`, and deleting a column calls `DELETE /api/columns/{id}` after a confirmation step.
 - **FRONT-006-AC07** The page file for `/boards/[id]` has no `"use client"` directive and is a Server Component.
 - **FRONT-006-AC08** The board data is fetched on the Next.js server with the JWT forwarded from the session cookie, and the JWT string does not appear in the page HTML.
+- **FRONT-006-AC09** The column-delete confirmation states that the column's cards will be deleted with it. After a successful `DELETE /api/columns/{id}`, the column and all its cards disappear from the page without a reload.
+- **FRONT-006-AC10** When `DELETE /api/columns/{id}` fails, the column and its cards stay visible and an error toast shows the `error` message.
 
 ### FRONT-007 Board analytics view
 `/boards/[id]` MUST display the analytics returned by `GET /api/boards/{id}/analytics` (A-10).
@@ -991,6 +1037,21 @@ Playwright MUST verify layouts at mobile and desktop widths.
 - **TEST-009-AC01** Playwright projects run the layout checks at a 360 px wide viewport and at a 1920 px wide viewport.
 - **TEST-009-AC02** At both widths, on each page in Section 4.2, the document's scroll width does not exceed its client width.
 
+### TEST-010 Deletion and retention tests
+The backend pytest suite MUST cover soft deletion of columns and cards, preservation of card foreign keys, hard deletion of boards, and activity-event retention (approved, UD-18 and UD-23). These tests run against PostgreSQL.
+
+**Acceptance criteria**
+- **TEST-010-AC01** A test deletes a column that holds 3 non-deleted cards and asserts HTTP 200, a non-null `deleted_at` on the column and on all 3 cards, and identical `deleted_at` values (COLUMN-003-AC03, AC04).
+- **TEST-010-AC02** A test asserts that, after the deletion, all card rows and the column row still exist and every card keeps its `column_id` (COLUMN-003-AC06), and that the database has a non-null foreign key from the card's `column_id` to the column (CARD-001-AC09).
+- **TEST-010-AC03** A test forces a failure between marking the column and marking its cards and asserts that the column and all its cards are unchanged (COLUMN-003-AC07).
+- **TEST-010-AC04** A test deletes a column that holds one previously soft-deleted card and asserts that the card keeps its original `deleted_at` (COLUMN-003-AC05).
+- **TEST-010-AC05** A test creates a card-created event, a card-moved event, and a comment-created event, then soft-deletes the column and its cards, then deletes the comment. It asserts that every event row still exists with unchanged values and that the members' activity counts are unchanged (ANALYTICS-006-AC09, ANALYTICS-004-AC06).
+- **TEST-010-AC06** A test asserts that the board response, the analytics response, and `GET /api/cards?assignee=me` exclude soft-deleted columns and cards (BOARD-003-AC07, ANALYTICS-002-AC03, CARD-007-AC06).
+- **TEST-010-AC07** A parametrized test asserts HTTP 404 and no change for these operations on a soft-deleted resource: `PATCH` and `DELETE /api/columns/{id}`, `POST /api/columns/{id}/cards`, `PATCH` and `DELETE /api/cards/{id}`, `PATCH /api/cards/{id}/position`, and the four comment endpoints of a soft-deleted card.
+- **TEST-010-AC08** A test hard-deletes a board that holds every kind of dependent row, including soft-deleted columns and cards, comments, notifications, memberships, and activity events. It asserts HTTP 200, zero remaining dependent rows, and that another board and all users are untouched (BOARD-005-AC04 to AC07).
+- **TEST-010-AC09** A test runs a sequence of creates, moves, column deletions, and card deletions and then asserts that no card with a null `deleted_at` references a column with a non-null `deleted_at` (CARD-001-AC10).
+- **TEST-010-AC10** A test asserts that the Flask URL map contains no restore or undelete route (COLUMN-003-AC12).
+
 ## 6. Non-Functional Requirements
 
 ### NFR-001 Password protection
@@ -1119,6 +1180,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | BOARD-003 | BOARD-003-AC04 | GET /api/boards/{id} |
 | BOARD-003 | BOARD-003-AC05 | GET /api/boards/{id} |
 | BOARD-003 | BOARD-003-AC06 | GET /api/boards/{id} |
+| BOARD-003 | BOARD-003-AC07 | GET /api/boards/{id} |
 | BOARD-004 | BOARD-004-AC01 | PATCH /api/boards/{id} |
 | BOARD-004 | BOARD-004-AC02 | PATCH /api/boards/{id} |
 | BOARD-004 | BOARD-004-AC03 | PATCH /api/boards/{id} |
@@ -1126,6 +1188,11 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | BOARD-005 | BOARD-005-AC01 | DELETE /api/boards/{id} |
 | BOARD-005 | BOARD-005-AC02 | DELETE /api/boards/{id} |
 | BOARD-005 | BOARD-005-AC03 | DELETE /api/boards/{id} (administrator check) |
+| BOARD-005 | BOARD-005-AC04 | DELETE /api/boards/{id} (service layer deletion strategy) |
+| BOARD-005 | BOARD-005-AC05 | DELETE /api/boards/{id} (service layer deletion strategy) |
+| BOARD-005 | BOARD-005-AC06 | DELETE /api/boards/{id} (transaction boundary) |
+| BOARD-005 | BOARD-005-AC07 | DELETE /api/boards/{id} (board isolation) |
+| BOARD-005 | BOARD-005-AC08 | Flask-Migrate migration scripts and DELETE /api/boards/{id} |
 | BOARD-006 | BOARD-006-AC01 | Shared board-authorization helper (service layer) |
 | BOARD-006 | BOARD-006-AC02 | Shared board-authorization helper (service layer) |
 | BOARD-006 | BOARD-006-AC03 | Administrator-only authorization decorator or helper |
@@ -1152,17 +1219,31 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COLUMN-002 | COLUMN-002-AC07 | PATCH /api/columns/{id} (Marshmallow schema) |
 | COLUMN-002 | COLUMN-002-AC08 | PATCH /api/columns/{id} (service layer) |
 | COLUMN-002 | COLUMN-002-AC09 | PATCH /api/columns/{id} (service layer) |
+| COLUMN-002 | COLUMN-002-AC10 | PATCH /api/columns/{id} (soft-delete guard) |
 | COLUMN-003 | COLUMN-003-AC01 | DELETE /api/columns/{id} |
 | COLUMN-003 | COLUMN-003-AC02 | DELETE /api/columns/{id} |
 | COLUMN-003 | COLUMN-003-AC03 | DELETE /api/columns/{id} (service layer) |
+| COLUMN-003 | COLUMN-003-AC04 | DELETE /api/columns/{id} (service layer) |
+| COLUMN-003 | COLUMN-003-AC05 | DELETE /api/columns/{id} (service layer) |
+| COLUMN-003 | COLUMN-003-AC06 | DELETE /api/columns/{id} (foreign key preservation) |
+| COLUMN-003 | COLUMN-003-AC07 | DELETE /api/columns/{id} (transaction boundary) |
+| COLUMN-003 | COLUMN-003-AC08 | GET /api/boards/{id} and GET /api/cards?assignee=me (soft-delete filtering) |
+| COLUMN-003 | COLUMN-003-AC09 | DELETE /api/columns/{id} |
+| COLUMN-003 | COLUMN-003-AC10 | PATCH /api/columns/{id}, POST /api/columns/{id}/cards, and card routes (soft-delete guard) |
+| COLUMN-003 | COLUMN-003-AC11 | DELETE /api/columns/{id} (service layer) |
+| COLUMN-003 | COLUMN-003-AC12 | Flask URL map (route registration) |
 | COLUMN-004 | COLUMN-004-AC01 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC02 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC03 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC04 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC05 | Column model (SQLAlchemy) |
+| COLUMN-004 | COLUMN-004-AC06 | PATCH /api/boards/{id}/columns/reorder (soft-delete guard) |
 | COLUMN-005 | COLUMN-005-AC01 | Column model (SQLAlchemy) |
 | COLUMN-005 | COLUMN-005-AC02 | POST /api/boards/{id}/columns |
 | COLUMN-005 | COLUMN-005-AC03 | Flask-Migrate migration scripts |
+| COLUMN-005 | COLUMN-005-AC04 | Column model (SQLAlchemy) |
+| COLUMN-005 | COLUMN-005-AC05 | Flask-Migrate migration scripts |
+| COLUMN-005 | COLUMN-005-AC06 | GET /api/boards/{id} and POST /api/boards/{id}/columns (soft-delete filtering) |
 | CARD-001 | CARD-001-AC01 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC02 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC03 | Card model (SQLAlchemy) |
@@ -1170,22 +1251,31 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-001 | CARD-001-AC05 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC06 | Flask-Migrate migration scripts |
 | CARD-001 | CARD-001-AC07 | Card model (SQLAlchemy) |
+| CARD-001 | CARD-001-AC08 | Card model (SQLAlchemy) |
+| CARD-001 | CARD-001-AC09 | Card model and Flask-Migrate migration scripts |
+| CARD-001 | CARD-001-AC10 | Card and column service layer (soft-delete invariant) |
 | CARD-002 | CARD-002-AC01 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC02 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC03 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC04 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC05 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC06 | POST /api/columns/{id}/cards (service layer) |
+| CARD-002 | CARD-002-AC07 | POST /api/columns/{id}/cards (soft-delete guard) |
 | CARD-003 | CARD-003-AC01 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC02 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC03 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC04 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC05 | PATCH /api/cards/{id} (Marshmallow schema) |
 | CARD-003 | CARD-003-AC06 | PATCH /api/cards/{id} |
+| CARD-003 | CARD-003-AC07 | PATCH /api/cards/{id} (soft-delete guard) |
 | CARD-004 | CARD-004-AC01 | DELETE /api/cards/{id} |
 | CARD-004 | CARD-004-AC02 | DELETE /api/cards/{id} |
 | CARD-004 | CARD-004-AC03 | GET /api/cards?assignee=me |
 | CARD-004 | CARD-004-AC04 | DELETE /api/cards/{id} |
+| CARD-004 | CARD-004-AC05 | DELETE /api/cards/{id} (service layer) |
+| CARD-004 | CARD-004-AC06 | DELETE /api/cards/{id} (soft-delete guard) |
+| CARD-004 | CARD-004-AC07 | DELETE /api/cards/{id} and card and comment routes (soft-delete guard) |
+| CARD-004 | CARD-004-AC08 | DELETE /api/cards/{id} (service layer) |
 | CARD-005 | CARD-005-AC01 | PATCH /api/cards/{id}/position |
 | CARD-005 | CARD-005-AC02 | PATCH /api/cards/{id}/position |
 | CARD-005 | CARD-005-AC03 | PATCH /api/cards/{id}/position |
@@ -1197,6 +1287,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-005 | CARD-005-AC09 | PATCH /api/cards/{id}/position (service layer) |
 | CARD-005 | CARD-005-AC10 | PATCH /api/cards/{id}/position (service layer) |
 | CARD-005 | CARD-005-AC11 | PATCH /api/cards/{id}/position (service layer) |
+| CARD-005 | CARD-005-AC12 | PATCH /api/cards/{id}/position (soft-delete guard) |
+| CARD-005 | CARD-005-AC13 | PATCH /api/cards/{id}/position (soft-delete guard) |
 | CARD-006 | CARD-006-AC01 | CardPositionSchema (Marshmallow) |
 | CARD-006 | CARD-006-AC02 | CardPositionSchema (Marshmallow) |
 | CARD-006 | CARD-006-AC03 | CardPositionSchema (Marshmallow) |
@@ -1205,26 +1297,32 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-007 | CARD-007-AC03 | GET /api/cards?assignee=me |
 | CARD-007 | CARD-007-AC04 | GET /api/cards?assignee=me |
 | CARD-007 | CARD-007-AC05 | GET /api/cards?assignee=me |
+| CARD-007 | CARD-007-AC06 | GET /api/cards?assignee=me (soft-delete filtering) |
 | COMMENT-001 | COMMENT-001-AC01 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC02 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC03 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC04 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC05 | POST /api/cards/{id}/comments |
+| COMMENT-001 | COMMENT-001-AC06 | POST /api/cards/{id}/comments (soft-delete guard) |
 | COMMENT-002 | COMMENT-002-AC01 | GET /api/cards/{id}/comments |
 | COMMENT-002 | COMMENT-002-AC02 | GET /api/cards/{id}/comments |
 | COMMENT-002 | COMMENT-002-AC03 | GET /api/cards/{id}/comments |
 | COMMENT-002 | COMMENT-002-AC04 | GET /api/cards/{id}/comments |
+| COMMENT-002 | COMMENT-002-AC05 | GET /api/cards/{id}/comments (soft-delete guard) |
 | COMMENT-003 | COMMENT-003-AC01 | PATCH /api/comments/{id} |
 | COMMENT-003 | COMMENT-003-AC02 | PATCH /api/comments/{id} (ownership check) |
 | COMMENT-003 | COMMENT-003-AC03 | PATCH /api/comments/{id} (ownership check) |
 | COMMENT-003 | COMMENT-003-AC04 | PATCH /api/comments/{id} |
 | COMMENT-003 | COMMENT-003-AC05 | PATCH /api/comments/{id} |
 | COMMENT-003 | COMMENT-003-AC06 | PATCH /api/comments/{id} |
+| COMMENT-003 | COMMENT-003-AC07 | PATCH /api/comments/{id} (soft-delete guard) |
 | COMMENT-004 | COMMENT-004-AC01 | DELETE /api/comments/{id} |
 | COMMENT-004 | COMMENT-004-AC02 | DELETE /api/comments/{id} (ownership check) |
 | COMMENT-004 | COMMENT-004-AC03 | DELETE /api/comments/{id} (ownership check) |
 | COMMENT-004 | COMMENT-004-AC04 | DELETE /api/comments/{id} |
 | COMMENT-004 | COMMENT-004-AC05 | DELETE /api/comments/{id} |
+| COMMENT-004 | COMMENT-004-AC06 | DELETE /api/comments/{id} (service layer) |
+| COMMENT-004 | COMMENT-004-AC07 | DELETE /api/comments/{id} (soft-delete guard) |
 | NOTIF-001 | NOTIF-001-AC01 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC02 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC03 | GET /api/notifications |
@@ -1242,15 +1340,19 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | ANALYTICS-001 | ANALYTICS-001-AC03 | GET /api/boards/{id}/analytics |
 | ANALYTICS-002 | ANALYTICS-002-AC01 | Analytics service (service layer) |
 | ANALYTICS-002 | ANALYTICS-002-AC02 | Analytics service (service layer) |
+| ANALYTICS-002 | ANALYTICS-002-AC03 | Analytics service (service layer) |
+| ANALYTICS-002 | ANALYTICS-002-AC04 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC01 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC02 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC03 | Analytics service (service layer) |
 | ANALYTICS-003 | ANALYTICS-003-AC04 | Analytics service (service layer) |
+| ANALYTICS-003 | ANALYTICS-003-AC05 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC01 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC02 | Activity recording (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC03 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC04 | Analytics service (service layer) |
 | ANALYTICS-004 | ANALYTICS-004-AC05 | Analytics service (service layer) |
+| ANALYTICS-004 | ANALYTICS-004-AC06 | Analytics service (service layer) |
 | ANALYTICS-005 | ANALYTICS-005-AC01 | Analytics service module and route handler |
 | ANALYTICS-005 | ANALYTICS-005-AC02 | Analytics service (SQLAlchemy join queries) |
 | ANALYTICS-005 | ANALYTICS-005-AC03 | Analytics service (SQLAlchemy join queries) |
@@ -1262,6 +1364,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | ANALYTICS-006 | ANALYTICS-006-AC06 | Activity-event table (SQLAlchemy model and Flask-Migrate migration) |
 | ANALYTICS-006 | ANALYTICS-006-AC07 | Activity-event table (no cascade delete) and Analytics service |
 | ANALYTICS-006 | ANALYTICS-006-AC08 | PATCH /api/comments/{id} and DELETE /api/comments/{id} (no activity recording) |
+| ANALYTICS-006 | ANALYTICS-006-AC09 | Activity-event table (retention) and DELETE /api/columns/{id} |
+| ANALYTICS-006 | ANALYTICS-006-AC10 | DELETE /api/boards/{id} (service layer deletion strategy) |
 | USER-001 | USER-001-AC01 | GET /api/users/me |
 | USER-001 | USER-001-AC02 | GET /api/users/me |
 | USER-001 | USER-001-AC03 | GET /api/users/me |
@@ -1313,6 +1417,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-006 | FRONT-006-AC06 | Page /boards/[id] and ColumnHeader.tsx |
 | FRONT-006 | FRONT-006-AC07 | Page /boards/[id] |
 | FRONT-006 | FRONT-006-AC08 | Page /boards/[id] and apiClient.ts (server-side mode) |
+| FRONT-006 | FRONT-006-AC09 | Page /boards/[id] and ColumnHeader.tsx |
+| FRONT-006 | FRONT-006-AC10 | Page /boards/[id] and ColumnHeader.tsx |
 | FRONT-007 | FRONT-007-AC01 | Page /boards/[id] (analytics panel) |
 | FRONT-007 | FRONT-007-AC02 | Page /boards/[id] (analytics panel) |
 | FRONT-008 | FRONT-008-AC01 | Card search filter (Client Component on /boards/[id]) |
@@ -1496,6 +1602,16 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-008 | TEST-008-AC08 | Playwright spec (Kanban journey) |
 | TEST-009 | TEST-009-AC01 | Playwright configuration (viewport projects) |
 | TEST-009 | TEST-009-AC02 | Playwright spec (responsive layout) |
+| TEST-010 | TEST-010-AC01 | Backend pytest suite (column deletion) |
+| TEST-010 | TEST-010-AC02 | Backend pytest suite (foreign key preservation) |
+| TEST-010 | TEST-010-AC03 | Backend pytest suite (column deletion transaction) |
+| TEST-010 | TEST-010-AC04 | Backend pytest suite (column deletion) |
+| TEST-010 | TEST-010-AC05 | Backend pytest suite (activity-event retention) |
+| TEST-010 | TEST-010-AC06 | Backend pytest suite (soft-delete filtering) |
+| TEST-010 | TEST-010-AC07 | Backend pytest suite (soft-delete guard) |
+| TEST-010 | TEST-010-AC08 | Backend pytest suite (board hard delete) |
+| TEST-010 | TEST-010-AC09 | Backend pytest suite (soft-delete invariant) |
+| TEST-010 | TEST-010-AC10 | Backend pytest suite (endpoint coverage test) |
 | NFR-001 | NFR-001-AC01 | User model and password hashing (service layer) |
 | NFR-001 | NFR-001-AC02 | Flask logging configuration |
 | NFR-002 | NFR-002-AC01 | Repository (secret scan procedure in README) |
@@ -1534,7 +1650,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 
 ## 8. Design Decisions
 
-This section records design decisions. Section 8.1 lists unresolved decisions. Every entry there is **[Proposed, not approved]**. A proposal is a suggestion for discussion and is not a requirement. Section 8.2 lists the **Approved Decisions**. They were settled by human review and are requirements. Entries UD-01 to UD-17 come from the Open Questions in `PROJECT_BRIEF.md` (Question 6, on per-board roles, is resolved by the board-specific authorization constraint and is no longer open). Entries UD-18 to UD-24 were found while writing and reviewing this document.
+This section records design decisions. Section 8.1 lists unresolved decisions. Every entry there is **[Proposed, not approved]**. A proposal is a suggestion for discussion and is not a requirement. Section 8.2 lists the **Approved Decisions**. They were settled by human review and are requirements. Entries UD-01 to UD-17 come from the Open Questions in `PROJECT_BRIEF.md` (Question 6, on per-board roles, is resolved by the board-specific authorization constraint and is no longer open). Entries UD-18 to UD-24 were found while writing and reviewing this document. UD-18 and UD-23 are approved and are listed in Section 8.2 with their original IDs.
 
 ### 8.1 Unresolved decisions
 
@@ -1594,11 +1710,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Rationale:** Runs the fast tests before merge and the deployed-URL tests only once a deployment exists.
 - **Affects:** TEST-001, TEST-005, TEST-006.
 
-### UD-18 Soft-delete scope
-- **Proposal:** Soft-delete applies to cards only. Boards, columns, and comments are deleted permanently.
-- **Rationale:** The requirement names `deleted_at` on Card only.
-- **Affects:** CARD-004, BOARD-005, COLUMN-003, COMMENT-004.
-
 ### UD-19 Status-code and response-body conventions
 - **Proposal:** Use the proposed rows in the table in Section 2.3. Return `{ "data": ... }` with HTTP 200 for delete requests.
 - **Rationale:** Standard REST conventions. Only the rows labeled "Approved" in that table come from the assignment.
@@ -1618,11 +1729,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Proposal:** Create the dedicated E2E account once through `POST /api/auth/register`, and store its credentials only as environment variables in CI and local configuration.
 - **Rationale:** It uses an existing endpoint and keeps credentials out of the repository.
 - **Affects:** TEST-006, TEST-007, TEST-008.
-
-### UD-23 Cards in a deleted column
-- **Proposal:** Deleting a column soft-deletes its cards in the same transaction.
-- **Rationale:** No card is left without a column, and it follows the Card `deleted_at` design.
-- **Affects:** COLUMN-003.
 
 ### 8.2 Approved Decisions
 
@@ -1668,7 +1774,7 @@ These decisions were approved by the human reviewer. They are requirements, not 
   - "Cards completed this week" counts non-deleted cards whose `completed_at` falls inside the week defined by UD-14.
 - **Rationale:** A card's current column alone cannot show when the card was completed. A stored timestamp written at the moment of the move gives a reliable completion time and handles reopened cards.
 - **Governs:** COLUMN-002, CARD-001, CARD-002, CARD-005, BOARD-003, ANALYTICS-003.
-- **Still open:** The week definition (UD-14) and the treatment of cards in a deleted column (UD-23). The remaining completion-timestamp rules are in the approved A-13.
+- **Still open:** The week definition (UD-14). The treatment of cards in a deleted column is approved in UD-23, and the remaining completion-timestamp rules are in the approved A-13.
 
 ### UD-13 Member activity events [Approved]
 - **Decision:**
@@ -1679,6 +1785,30 @@ These decisions were approved by the human reviewer. They are requirements, not 
 - **Rationale:** Current data cannot show who did what and when. An append-only log written at the time of each action gives a reliable count and keeps boards separate.
 - **Governs:** ANALYTICS-004, ANALYTICS-005, ANALYTICS-006.
 - **Still open:** The time window for activity counts follows UD-14. Further rules are in the approved A-13 and A-14.
+
+### UD-18 Soft-delete scope [Approved]
+- **Decision:**
+  - Boards are hard-deleted.
+  - Columns are soft-deleted using a nullable UTC `deleted_at` timestamp.
+  - Cards are soft-deleted using their `deleted_at` timestamp.
+  - Comments are hard-deleted when explicitly deleted.
+  - Normal board, card, and analytics queries exclude soft-deleted columns and cards.
+  - Mutations that target a soft-deleted column or card do not operate on it and return HTTP 404.
+  - Hard-deleting a board removes its dependent columns, cards (including soft-deleted ones), comments, notifications, memberships, and activity events, using an explicitly defined deletion order or foreign-key strategy that never leaves orphan rows or raises a foreign-key error.
+  - Existing activity events survive the soft-deletion of columns and cards and the deletion of comments.
+  - No restore or undelete endpoint is required.
+- **Rationale:** Soft deletion keeps the card-to-column foreign key and the activity history intact. A board is a self-contained tree, so deleting it removes everything below it.
+- **Governs:** BOARD-003, BOARD-005, COLUMN-003, COLUMN-005, CARD-001, CARD-004, COMMENT-004, ANALYTICS-002, ANALYTICS-003, ANALYTICS-006, TEST-010.
+
+### UD-23 Cards in a deleted column [Approved]
+- **Decision:**
+  - Deleting a column soft-deletes the column and all its currently active cards in one database transaction.
+  - The column and the affected cards receive the same UTC `deleted_at` timestamp.
+  - Cards that were already soft-deleted keep their original `deleted_at`.
+  - The `cards.column_id` foreign key is preserved. The column is not hard-deleted and its cards are not cascade-deleted.
+  - Existing activity events survive.
+- **Rationale:** One transaction and one timestamp keep a column and its cards consistent. A shared timestamp also identifies which cards were removed with the column. Preserving the foreign key avoids orphaned cards and keeps the activity history joinable.
+- **Governs:** COLUMN-003, COLUMN-005, CARD-001, CARD-004, ANALYTICS-002, ANALYTICS-006, FRONT-006, TEST-010.
 
 ### UD-24 Board membership endpoint [Approved extension]
 - **Decision:** Add `POST /api/boards/{id}/members` as one extension endpoint. Only Board Administrators may call it. It accepts the email of an existing registered user and adds that user as a Board Member. It rejects duplicate membership. It preserves board isolation and authorization. It does not change the 26 mandatory endpoints, and no other membership endpoint is added.
@@ -1717,27 +1847,37 @@ These decisions were approved by the human reviewer. They are requirements, not 
   4. `GET /api/boards/{id}` includes the authenticated requester's board role, which is `administrator` or `member`.
 - **Governs:** ANALYTICS-004, ANALYTICS-006, BOARD-003, BOARD-007, FRONT-025, Section 2.3.
 
+### A-15 Consequences of soft deletion [Approved]
+- **Decision:**
+  1. Soft-deleting a card preserves its comments in the database. The comment endpoints (create, list, edit, delete) return HTTP 404 while the card is soft-deleted.
+  2. Soft-deleted cards retain their `completed_at` and assignee values.
+  3. A soft-deleted column returns HTTP 404 when it is directly accessed or mutated.
+  4. Using a soft-deleted column as the destination of a card move, or including it in a reorder payload, returns HTTP 400.
+  5. Deleting a card or a column does not create an activity event.
+  6. Cards that were already soft-deleted keep their original `deleted_at` when their column is deleted (this repeats UD-23).
+- **Governs:** COLUMN-002, COLUMN-003, COLUMN-004, CARD-002, CARD-004, CARD-005, COMMENT-001, COMMENT-002, COMMENT-003, COMMENT-004, ANALYTICS-006, Section 2.3.
+
 ## 9. Requirement Index and Summary
 
 | Category | Name | Requirements | Acceptance criteria |
 |---|---|---|---|
 | AUTH | Authentication | 4 | 17 |
-| BOARD | Board management and membership | 7 | 33 |
-| COLUMN | Column management | 5 | 24 |
-| CARD | Card management and positioning | 7 | 42 |
-| COMMENT | Comments | 4 | 20 |
+| BOARD | Board management and membership | 7 | 39 |
+| COLUMN | Column management | 5 | 38 |
+| CARD | Card management and positioning | 7 | 54 |
+| COMMENT | Comments | 4 | 25 |
 | NOTIF | Notifications | 3 | 12 |
-| ANALYTICS | Board analytics | 6 | 25 |
+| ANALYTICS | Board analytics | 6 | 31 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 149 |
+| FRONT | Frontend pages and components | 26 | 151 |
 | API | API client and response format | 7 | 26 |
-| TEST | Testing | 9 | 50 |
+| TEST | Testing | 10 | 60 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **91** | **442** |
+| **Total** | | **92** | **497** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 7 (UD-03, UD-04, UD-10, UD-11, UD-12, UD-13, UD-24) plus 4 approved assumptions (A-11, A-12, A-13, A-14).
-- Unresolved design decisions (all [Proposed, not approved]): 17.
-- Acceptance criteria blocked by an unresolved decision: 13. Blocking decisions: UD-05: 4; UD-08: 2; UD-14: 6; UD-23: 1.
+- Approved decisions: 9 (UD-03, UD-04, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 15.
+- Acceptance criteria blocked by an unresolved decision: 13. Blocking decisions: UD-05: 4; UD-08: 2; UD-14: 7.
