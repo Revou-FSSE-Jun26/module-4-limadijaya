@@ -22,7 +22,7 @@ RevoTask lets authenticated users manage boards, columns, and cards. Cards can b
 - **[Extension]** marks functionality outside the 26 mandatory endpoints. The only extension is `POST /api/boards/{id}/members` (BOARD-007), approved in UD-24.
 - Requirement IDs use the form `CATEGORY-NNN`. Acceptance criterion IDs use the form `CATEGORY-NNN-ACnn`.
 - Path parameters are written as `{id}`.
-- Requirements and acceptance criteria that depend on an unresolved decision name the decision (for example `UD-05`) and are marked **Blocked**. A blocked criterion cannot be tested until the decision is approved.
+- Requirements and acceptance criteria that depend on an unresolved decision name the decision (for example `UD-14`) and are marked **Blocked**. A blocked criterion cannot be tested until the decision is approved.
 
 ### 1.4 Derived assumptions (to confirm)
 These inferences are embedded in acceptance criteria. They are not open questions, but they are not stated verbatim in the brief. Confirm or correct them.
@@ -45,9 +45,26 @@ A-11 (card search matching), A-12 (page architecture), A-13 (completion timestam
 | Role | Description |
 |---|---|
 | Board Member | A user who belongs to a board and works with its content. |
-| Board Administrator | A user who manages a board. Holds all Board Member capabilities plus administrator-only operations. |
+| Board Administrator | A user who manages a board. Holds all Board Member capabilities plus the five administrator-only operations below. |
 
-Membership and administrator status are **board-specific**. A user can be an administrator on one board and a member on another. The creator of a board becomes that board's Board Administrator (approved, UD-04). Other users join a board as Board Members through the approved extension endpoint (UD-24). The approved administrator-only operations are marking a column as done (UD-12) and adding a member (UD-24). The full list of administrator-only operations is unresolved (UD-05).
+Membership and administrator status are **board-specific**. A user can be an administrator on one board and a member on another, and being an administrator on one board grants no privilege on another. The creator of a board becomes that board's Board Administrator (approved, UD-04). Other users join a board as Board Members through the approved extension endpoint (UD-24). The permission table below is approved (UD-05).
+
+| Operation | Board Member | Board Administrator |
+|---|---|---|
+| View a board, its columns, cards, comments, and analytics | Yes | Yes |
+| Create a board (the creator becomes its administrator) | Any authenticated user | Any authenticated user |
+| Create columns, rename columns, reorder columns | Yes | Yes |
+| Create, edit, move, reorder, and delete cards | Yes | Yes |
+| Create comments | Yes | Yes |
+| Edit or delete own comments | Yes | Yes |
+| Edit or delete another user's comment | No (403) | No (403) |
+| **Administrator-only 1:** `PATCH /api/boards/{id}` (rename board) | No (403) | Yes |
+| **Administrator-only 2:** `DELETE /api/boards/{id}` (delete board) | No (403) | Yes |
+| **Administrator-only 3:** `POST /api/boards/{id}/members` (add member) | No (403) | Yes |
+| **Administrator-only 4:** `PATCH /api/columns/{id}` when the body contains `is_done` | No (403) | Yes |
+| **Administrator-only 5:** `DELETE /api/columns/{id}` (soft-delete column and its active cards) | No (403) | Yes |
+
+A user who is not a member of the board receives the uniform 404 for every row of this table except board creation.
 
 ### 2.2 Architecture summary [Approved]
 | Component | Platform |
@@ -69,7 +86,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 |---|---|---|
 | 401 | Missing, invalid, or expired JWT | Approved |
 | 404 | Authenticated user accesses a board they do not belong to, or any resource inside such a board | Approved |
-| 403 | Authenticated board member attempts an administrator-only operation | Approved |
+| 403 | Authenticated board member attempts an administrator-only operation (the five operations in Section 2.1) | Approved (UD-05) |
 | 403 | Authenticated non-owner edits or deletes another user's comment on a board they can access | Approved |
 | 201 | Comment created | Approved |
 | 400 | Comment created with missing content | Approved |
@@ -83,6 +100,22 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 404 | Resource does not exist, or a notification belongs to another user | Proposed, not approved (UD-19) |
 | 409 | Registration or profile update with an email already in use | Proposed, not approved (UD-19) |
 | 500 | Unhandled server error | Proposed, not approved (UD-19) |
+
+### 2.4 Authorization check order [Approved, UD-05]
+Every protected resource operation MUST apply these checks in this order and stop at the first one that fails:
+
+1. **Authentication.** A missing, invalid, or expired JWT returns HTTP 401.
+2. **Resource and membership.** A missing resource, a soft-deleted column or card, or a board the caller is not a member of returns the uniform HTTP 404. The status and body do not differ between a resource that does not exist and one the caller may not access.
+3. **Permission.** An authenticated board member who lacks the required permission (one of the five administrator-only operations, or comment ownership) returns HTTP 403.
+4. **Validation and conflict.** Request validation failures return HTTP 400, and semantic conflicts return HTTP 409.
+
+Rules that follow from the order:
+- A non-member never receives 403, whatever the request body.
+- A member without the permission receives 403 before any field is validated, so an invalid, empty, or unchanged body does not change the answer. For a `PATCH /api/columns/{id}` body that contains the `is_done` key, a non-administrator receives 403 whatever the value, and a mixed body (for example `name` together with `is_done`) is rejected as a whole with no field applied.
+- A soft-deleted column or card returns 404 to administrators and members alike, so a member's `DELETE /api/columns/{id}` on an already soft-deleted column returns 404, not 403.
+- A rejected request changes no row (BOARD-006-AC07).
+
+**Exception for framework-level parsing.** A request that cannot be parsed or routed may be rejected earlier by the framework: a body that is not valid JSON (HTTP 400), an unsupported content type (HTTP 415), an unsupported method (HTTP 405), or a route that does not match, including a path ID that is not a valid UUID (HTTP 404). These responses depend only on the shape of the request, never on whether the resource exists or on the caller's membership, so the uniform 404 rule for resource access is not weakened.
 
 ## 3. Backend Requirements
 
@@ -193,21 +226,21 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-003-AC07** Columns with a non-null `deleted_at` are absent from the response, and so are all cards that belong to them (approved, UD-18).
 
 ### BOARD-004 Update board
-`PATCH /api/boards/{id}` MUST update a board's name.
+`PATCH /api/boards/{id}` MUST update a board's name. Only a Board Administrator of the board may rename it (approved, UD-05).
 
 **Acceptance criteria**
-- **BOARD-004-AC01** An authorized user sending a non-empty `name` receives HTTP 200 and `data` contains the new name.
-- **BOARD-004-AC02** An empty or missing `name` returns HTTP 400 and the stored name is unchanged.
-- **BOARD-004-AC03** An authenticated user who is not a member receives HTTP 404.
-- **BOARD-004-AC04** **Blocked by UD-05.** If the operation is designated administrator-only, a member who is not an administrator receives HTTP 403 and the name is unchanged.
+- **BOARD-004-AC01** A Board Administrator sending a non-empty `name` receives HTTP 200 and `data` contains the new name.
+- **BOARD-004-AC02** A Board Administrator sending an empty or missing `name` receives HTTP 400 and the stored name is unchanged.
+- **BOARD-004-AC03** An authenticated user who is not a member receives HTTP 404, and the response is identical to the one for a board that does not exist.
+- **BOARD-004-AC04** A Board Member who is not an administrator of the board receives HTTP 403 and the name is unchanged, including when the body is empty or invalid (approved, UD-05).
 
 ### BOARD-005 Delete board
-`DELETE /api/boards/{id}` MUST hard-delete a board (approved, UD-18). The same transaction MUST remove every dependent row: memberships, columns (including soft-deleted ones), cards (including soft-deleted ones), comments, notifications that refer to the board or its cards, and activity events of the board. Users are not deleted. The deletion order or foreign-key strategy MUST be defined explicitly in the schema or the service, and MUST NOT depend on database defaults.
+`DELETE /api/boards/{id}` MUST hard-delete a board (approved, UD-18). Only a Board Administrator of the board may delete it (approved, UD-05). The same transaction MUST remove every dependent row: memberships, columns (including soft-deleted ones), cards (including soft-deleted ones), comments, notifications that refer to the board or its cards, and activity events of the board. Users are not deleted. The deletion order or foreign-key strategy MUST be defined explicitly in the schema or the service, and MUST NOT depend on database defaults.
 
 **Acceptance criteria**
-- **BOARD-005-AC01** An authorized user receives HTTP 200, and a following `GET /api/boards/{id}` by that user returns HTTP 404.
-- **BOARD-005-AC02** An authenticated user who is not a member receives HTTP 404 and the board still exists.
-- **BOARD-005-AC03** **Blocked by UD-05.** If the operation is designated administrator-only, a member who is not an administrator receives HTTP 403 and the board still exists.
+- **BOARD-005-AC01** A Board Administrator receives HTTP 200, and a following `GET /api/boards/{id}` by that user returns HTTP 404.
+- **BOARD-005-AC02** An authenticated user who is not a member receives HTTP 404, the response is identical to the one for a board that does not exist, and the board still exists.
+- **BOARD-005-AC03** A Board Member who is not an administrator of the board receives HTTP 403 (approved, UD-05), and the board and all its dependent rows (memberships, columns, cards, comments, notifications, activity events) are unchanged.
 - **BOARD-005-AC04** For a board that holds every kind of dependent row, the request returns HTTP 200, and afterward no membership, column, card, comment, notification, or activity-event row that belongs to the board remains in the database. The dependent rows include columns and cards that were already soft-deleted.
 - **BOARD-005-AC05** The request does not fail with a foreign-key violation or HTTP 500 when the board contains soft-deleted columns, soft-deleted cards, comments, notifications, and activity events.
 - **BOARD-005-AC06** The deletion runs in one transaction. When a failure is forced after some dependent rows were removed, the board and all its dependent rows are unchanged afterward.
@@ -215,23 +248,27 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-005-AC08** The deletion strategy is explicit: either every foreign key that leads to `boards` declares its delete behavior in a Flask-Migrate migration, or the service deletes the dependent rows in a documented order. A test that deletes a fully populated board passes against a database created by `flask db upgrade`.
 
 ### BOARD-006 Board-specific authorization
-Membership and administrator status MUST be evaluated per board. The same check MUST apply to every board-scoped endpoint.
+Membership and administrator status MUST be evaluated per board. The same check MUST apply to every board-scoped endpoint. The permission table in Section 2.1 and the check order in Section 2.3 are approved (UD-05). Exactly five operations are administrator-only: `PATCH /api/boards/{id}`, `DELETE /api/boards/{id}`, `POST /api/boards/{id}/members`, `PATCH /api/columns/{id}` when the body contains `is_done`, and `DELETE /api/columns/{id}`. All other board-scoped operations are open to every board member.
 
 **Acceptance criteria**
-- **BOARD-006-AC01** Given a user who is an administrator of board A and a non-administrator member of board B, the same approved administrator-only operation (setting `is_done` on a column, UD-12, or adding a member, UD-24) succeeds on board A and returns HTTP 403 on board B.
-- **BOARD-006-AC02** For each board-scoped endpoint (columns, column reorder, cards, card position, comments, analytics), a non-member of the board receives HTTP 404.
-- **BOARD-006-AC03** **Blocked by UD-05.** Every operation in the approved administrator-only list returns HTTP 403 to a non-administrator member.
+- **BOARD-006-AC01** Given a user who is an administrator of board A and a non-administrator member of board B, each of the five administrator-only operations succeeds on board A and returns HTTP 403 on board B, and nothing on board B changes.
+- **BOARD-006-AC02** For each board-scoped endpoint (board update, board delete, member add, columns, column reorder, cards, card position, comments, analytics), a non-member of the board receives HTTP 404.
+- **BOARD-006-AC03** Each of the five administrator-only operations returns HTTP 403 to a Board Member who is not an administrator of that board, and nothing changes (approved, UD-05).
+- **BOARD-006-AC04** A Board Member who is not an administrator succeeds at each member-allowed operation: viewing the board, columns, cards, comments, and analytics; creating and renaming columns; reordering columns; creating, editing, moving, reordering, and deleting cards; creating comments; and editing or deleting their own comments.
+- **BOARD-006-AC05** For each board-scoped endpoint, the response sent to a non-member (status and body) is identical to the response sent for a resource ID that does not exist.
+- **BOARD-006-AC06** The checks run in the order defined in Section 2.3: HTTP 401 for missing or invalid authentication, then 404 for a missing resource or a non-member, then 403 for a member without the required permission, then 400 or 409. A non-member who sends an administrator-only operation receives 404, not 403. A member who sends an administrator-only operation with an invalid body receives 403, not 400.
+- **BOARD-006-AC07** A request rejected with 400, 401, 403, 404, or 409 changes no row, including `updated_at` values, and creates no activity event or notification. A mixed request is rejected as a whole, with no partial update.
 
 ### BOARD-007 Add board member by email [Extension]
-`POST /api/boards/{id}/members` MUST let a Board Administrator add an existing registered user to the board as a Board Member, identified by email. This endpoint is an approved extension (UD-24) outside the 26 mandatory endpoints. It relies on the board creator being an administrator (UD-04). The request body is `{ "email": "..." }`. No other membership endpoint (listing, removal, or role change) is part of this specification.
+`POST /api/boards/{id}/members` MUST let a Board Administrator add an existing registered user to the board as a Board Member, identified by email. Only administrators may call it (approved, UD-24 and UD-05). This endpoint is an approved extension (UD-24) outside the 26 mandatory endpoints. It relies on the board creator being an administrator (UD-04). The request body is `{ "email": "..." }`. No other membership endpoint (listing, removal, or role change) is part of this specification.
 
 **Acceptance criteria**
 - **BOARD-007-AC01** A Board Administrator sending the email of a registered user who is not yet a member receives HTTP 201 and `data` contains the user's `id`, `name`, and `email` with no password. After this, the added user receives HTTP 200 from `GET /api/boards/{id}` and sees the board in `GET /api/boards`.
-- **BOARD-007-AC02** A Board Member who is not an administrator of the board receives HTTP 403 and no membership is created.
+- **BOARD-007-AC02** A Board Member who is not an administrator of the board receives HTTP 403 and no membership is created, including when the body is empty, invalid, or contains extra fields such as `role` (approved, UD-05).
 - **BOARD-007-AC03** An authenticated user who is not a member of the board receives HTTP 404, and the response is identical for a board that does not exist.
 - **BOARD-007-AC04** Adding an email that already belongs to a member of the same board returns HTTP 409 (approved, A-14) and the board still has one membership for that user.
 - **BOARD-007-AC05** An email that belongs to no registered user returns HTTP 404 with an `error` message and no membership is created.
-- **BOARD-007-AC06** A missing, empty, or syntactically invalid `email` returns HTTP 400. A body containing any field other than `email`, such as `role`, returns HTTP 400.
+- **BOARD-007-AC06** A Board Administrator sending a missing, empty, or syntactically invalid `email` receives HTTP 400. A Board Administrator sending a body that contains any field other than `email`, such as `role`, receives HTTP 400.
 - **BOARD-007-AC07** A request with no token returns HTTP 401.
 - **BOARD-007-AC08** A user added to board A receives HTTP 404 from `GET /api/boards/{id}` for board B, where they were not added.
 - **BOARD-007-AC09** A user added by this endpoint is a Board Member and not an administrator, so an administrator-only operation on that board returns HTTP 403 for them.
@@ -249,7 +286,7 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-001-AC04** A non-member of the board receives HTTP 404.
 
 ### COLUMN-002 Rename column
-`PATCH /api/columns/{id}` MUST update a column's name. It MUST also let a Board Administrator mark or unmark the column as a done (completed) column through a boolean `is_done` field (approved, UD-12; field name in A-13).
+`PATCH /api/columns/{id}` MUST update a column's name for any board member. It MUST also let a Board Administrator mark or unmark the column as a done (completed) column through a boolean `is_done` field (approved, UD-12; field name in A-13). A request whose body contains the `is_done` key is an administrator-only operation (approved, UD-05). For a Board Member who is not an administrator, the key alone triggers HTTP 403 before any field is validated, whatever its value. When an administrator sends an `is_done` value equal to the column's stored value, the completion-state update is a no-op (approved, UD-05).
 
 **Acceptance criteria**
 - **COLUMN-002-AC01** A member sending a non-empty `name` receives HTTP 200 and `data` contains the new name.
@@ -257,28 +294,34 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-002-AC03** A non-member of the column's board receives HTTP 404.
 - **COLUMN-002-AC04** A column ID that does not exist returns HTTP 404.
 - **COLUMN-002-AC05** A Board Administrator sending `is_done: true` receives HTTP 200 and `data` contains `is_done` true, and a following `GET /api/boards/{id}` shows that column with `is_done` true.
-- **COLUMN-002-AC06** A Board Member who is not an administrator and sends `is_done` receives HTTP 403, and the column's `is_done` is unchanged.
-- **COLUMN-002-AC07** A non-boolean `is_done` value returns HTTP 400 and the column is unchanged.
+- **COLUMN-002-AC06** A Board Member who is not an administrator and sends a body that contains the `is_done` key receives HTTP 403 whatever the value is (true, false, equal to the stored value, or invalid), and the column's `is_done` is unchanged.
+- **COLUMN-002-AC07** A Board Administrator sending a non-boolean `is_done` value receives HTTP 400 and the column is unchanged.
 - **COLUMN-002-AC08** When an administrator marks a column done, each non-deleted card already in the column gets `completed_at` equal to the time of the request (A-13).
 - **COLUMN-002-AC09** When an administrator unmarks a done column, `completed_at` is set to null for each card in the column (A-13).
-- **COLUMN-002-AC10** A request for a soft-deleted column, with `name` or `is_done`, returns HTTP 404 and the column is unchanged (approved, UD-18).
+- **COLUMN-002-AC10** A request from an administrator or a member for a soft-deleted column, with `name` or `is_done`, returns HTTP 404 and the column is unchanged (approved, UD-18).
+- **COLUMN-002-AC11** A Board Member who is not an administrator and sends `name` together with `is_done` receives HTTP 403, and neither the name, `is_done`, `updated_at`, nor any card's `completed_at` changes (approved, UD-05).
+- **COLUMN-002-AC12** When a Board Administrator sends `is_done` equal to the column's stored value (true on a done column, false on an active column), the response is HTTP 200, no card's `completed_at` changes, and no activity event or notification is created. Sending `is_done: true` twice in a row leaves every `completed_at` value from the first request unchanged (approved, UD-05).
+- **COLUMN-002-AC13** When a Board Administrator sends `name` together with an `is_done` value equal to the stored value, a valid `name` is applied and the completion-state update is a no-op. A request that contains only the unchanged `is_done` modifies no field and no `updated_at`.
+- **COLUMN-002-AC14** When `is_done` changes, the column update and the `completed_at` updates of its cards run in one transaction. When a failure is forced after the column was updated and before the cards were updated, the column and all its cards are unchanged afterward (approved, UD-05).
 
 ### COLUMN-003 Delete column
-`DELETE /api/columns/{id}` MUST soft-delete a column and all of its currently active cards in one database transaction (approved, UD-18 and UD-23). The column and the affected cards MUST receive the same UTC `deleted_at` timestamp. The column row and the foreign key from each card to its column MUST be preserved: the column is not hard-deleted and its cards are not cascade-deleted. No endpoint restores a soft-deleted column or card.
+`DELETE /api/columns/{id}` MUST soft-delete a column and all of its currently active cards in one database transaction (approved, UD-18 and UD-23). Only a Board Administrator of the column's board may delete a column (approved, UD-05). The column and the affected cards MUST receive the same UTC `deleted_at` timestamp. The column row and the foreign key from each card to its column MUST be preserved: the column is not hard-deleted and its cards are not cascade-deleted. No endpoint restores a soft-deleted column or card.
 
 **Acceptance criteria**
-- **COLUMN-003-AC01** A member receives HTTP 200, and `GET /api/boards/{id}` no longer lists the column.
-- **COLUMN-003-AC02** A non-member of the column's board receives HTTP 404 and the column still exists.
+- **COLUMN-003-AC01** A Board Administrator receives HTTP 200, and `GET /api/boards/{id}` no longer lists the column.
+- **COLUMN-003-AC02** A non-member of the column's board receives HTTP 404, the response is identical to the one for a column that does not exist, and the column still exists.
 - **COLUMN-003-AC03** Deleting a column that contains 3 non-deleted cards returns HTTP 200, and afterward the column row and all 3 card rows still exist with a non-null `deleted_at`.
 - **COLUMN-003-AC04** The column and the affected cards have identical `deleted_at` values, and the value is a UTC timestamp.
 - **COLUMN-003-AC05** A card that was already soft-deleted before the column was deleted keeps its original `deleted_at` value. A card in another column of the same board is unchanged.
 - **COLUMN-003-AC06** After deletion, every card of the column still has its original `column_id`, and the column row it references still exists. No card or column row is removed from the database.
 - **COLUMN-003-AC07** The deletion is one transaction. When a failure is forced after the column was marked deleted and before the cards were marked, the column and all its cards are unchanged afterward.
 - **COLUMN-003-AC08** After deletion, `GET /api/boards/{id}` lists neither the column nor any of its cards, and `GET /api/cards?assignee=me` lists none of its cards.
-- **COLUMN-003-AC09** Sending `DELETE /api/columns/{id}` for an already soft-deleted column returns HTTP 404 and no `deleted_at` value changes.
+- **COLUMN-003-AC09** Sending `DELETE /api/columns/{id}` for an already soft-deleted column returns HTTP 404 to an administrator and to a member, and no `deleted_at` value changes.
 - **COLUMN-003-AC10** After deletion, `PATCH /api/columns/{id}` (including `is_done`), `POST /api/columns/{id}/cards`, and any card operation on its cards return HTTP 404, and nothing changes.
 - **COLUMN-003-AC11** After deletion, the `completed_at` and assignee values of the column's cards are unchanged (approved, A-15), and no activity event is created or removed.
 - **COLUMN-003-AC12** The URL map contains no route that restores or undeletes a column or a card.
+- **COLUMN-003-AC13** A Board Member who is not an administrator of the column's board receives HTTP 403 (approved, UD-05). The column row, every card of the column, and all their `deleted_at` values, `updated_at` values, and `column_id` values are unchanged, and no activity event is created.
+- **COLUMN-003-AC14** A user who is an administrator of another board and only a member of the column's board receives HTTP 403, and nothing changes.
 
 ### COLUMN-004 Reorder columns
 `PATCH /api/boards/{id}/columns/reorder` MUST persist a new column order using positive FLOAT order values. The request and response shape is unresolved (UD-20).
@@ -417,7 +460,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **COMMENT-002-AC05** A soft-deleted card returns HTTP 404 and no comments (approved, A-15).
 
 ### COMMENT-003 Edit comment (owner only)
-`PATCH /api/comments/{id}` MUST allow only the comment owner to edit a comment.
+`PATCH /api/comments/{id}` MUST allow only the comment owner to edit a comment. Ownership applies equally to Board Administrators and Board Members: an administrator has no override on another user's comment (approved, UD-05).
 
 **Acceptance criteria**
 - **COMMENT-003-AC01** The owner sending non-empty `content` receives HTTP 200 and `data` contains the new content.
@@ -427,9 +470,11 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **COMMENT-003-AC05** The owner sending empty or missing `content` receives HTTP 400 and the content is unchanged.
 - **COMMENT-003-AC06** A user who is not a member of the comment's board receives HTTP 404.
 - **COMMENT-003-AC07** The owner of a comment whose card is soft-deleted receives HTTP 404 and the content is unchanged (approved, A-15).
+- **COMMENT-003-AC08** A Board Administrator or a Board Member who is not the comment owner and sends empty, missing, or valid `content` receives HTTP 403, and the content and `updated_at` are unchanged (approved, UD-05).
+- **COMMENT-003-AC09** An owner receives HTTP 200 when editing their own comment, whether the owner is a Board Administrator or a Board Member.
 
 ### COMMENT-004 Delete comment (owner only)
-`DELETE /api/comments/{id}` MUST allow only the comment owner to delete a comment.
+`DELETE /api/comments/{id}` MUST allow only the comment owner to delete a comment. Ownership applies equally to Board Administrators and Board Members: an administrator has no override on another user's comment (approved, UD-05).
 
 **Acceptance criteria**
 - **COMMENT-004-AC01** The owner receives HTTP 200, and the comment is absent from `GET /api/cards/{id}/comments`.
@@ -439,6 +484,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **COMMENT-004-AC05** A comment ID that does not exist returns HTTP 404.
 - **COMMENT-004-AC06** After the owner deletes a comment, the comment row no longer exists in the database (hard delete, approved, UD-18), and the activity events that reference it remain.
 - **COMMENT-004-AC07** The owner of a comment whose card is soft-deleted receives HTTP 404 and the comment still exists (approved, A-15).
+- **COMMENT-004-AC08** An owner receives HTTP 200 when deleting their own comment, whether the owner is a Board Administrator or a Board Member.
 
 ### 3.6 Notifications (NOTIF)
 
@@ -680,10 +726,10 @@ The `/boards/[id]` page MUST be a Server Component that fetches and displays a b
 - **FRONT-006-AC03** Submitting a column name creates a column through `POST /api/boards/{id}/columns`, and the column appears after the existing columns.
 - **FRONT-006-AC04** Submitting a card title in a column's `AddCardForm` creates a card through `POST /api/columns/{id}/cards`, and the card appears in that column.
 - **FRONT-006-AC05** Activating a card opens `CardDetailModal` for that card.
-- **FRONT-006-AC06** Renaming a column through its `ColumnHeader` calls `PATCH /api/columns/{id}`, and deleting a column calls `DELETE /api/columns/{id}` after a confirmation step.
+- **FRONT-006-AC06** Renaming a column through its `ColumnHeader` calls `PATCH /api/columns/{id}` for any board member, and deleting a column, which only a Board Administrator can do (approved, UD-05), calls `DELETE /api/columns/{id}` after a confirmation step.
 - **FRONT-006-AC07** The page file for `/boards/[id]` has no `"use client"` directive and is a Server Component.
 - **FRONT-006-AC08** The board data is fetched on the Next.js server with the JWT forwarded from the session cookie, and the JWT string does not appear in the page HTML.
-- **FRONT-006-AC09** The column-delete confirmation states that the column's cards will be deleted with it. After a successful `DELETE /api/columns/{id}`, the column and all its cards disappear from the page without a reload.
+- **FRONT-006-AC09** For a Board Administrator, the column-delete confirmation states that the column's cards will be deleted with it. After a successful `DELETE /api/columns/{id}`, the column and all its cards disappear from the page without a reload.
 - **FRONT-006-AC10** When `DELETE /api/columns/{id}` fails, the column and its cards stay visible and an error toast shows the `error` message.
 
 ### FRONT-007 Board analytics view
@@ -791,7 +837,7 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-024-AC06** The link has an accessible name that includes the board name.
 
 ### FRONT-025 ColumnHeader.tsx
-`ColumnHeader.tsx` MUST show a column's name and card count and provide rename and delete controls. It MUST also let a Board Administrator toggle the column between Done and Active, and it MUST NOT offer that control to Board Members. It is a Client Component.
+`ColumnHeader.tsx` MUST show a column's name and card count and provide a rename control to every board member. It MUST provide the delete control and the Done/Active toggle only to a Board Administrator, and it MUST NOT offer either to Board Members (approved, UD-05). It is a Client Component.
 
 **Acceptance criteria**
 - **FRONT-025-AC01** The file exports a TypeScript interface `ColumnHeaderProps` that declares `columnId: string`, `name: string`, `cardCount: number`, `onRename` with a typed signature, and `onDelete` with a typed signature, `isDone: boolean`, `isAdministrator: boolean`, and `onToggleDone` with a typed signature, and `tsc --noEmit` with `strict` enabled passes with no `any` in the props.
@@ -809,6 +855,8 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-025-AC13** When the request fails with a non-2xx status or a network error, an error toast is shown and the header shows the previous state again.
 - **FRONT-025-AC14** While the request is pending, the toggle is a `BaseButton` in its loading state, and a second activation sends no second request.
 - **FRONT-025-AC15** After a successful toggle, the board analytics are refreshed: a new request for `GET /api/boards/{id}/analytics` is made, directly or by refreshing the server-rendered data, and the analytics panel shows the new response. After a failed toggle, no analytics request is made.
+- **FRONT-025-AC16** When `isAdministrator` is true, the delete control is present. When `isAdministrator` is false, the delete control is not present in the DOM, and the rename control is still present and works.
+- **FRONT-025-AC17** When `DELETE /api/columns/{id}` or the toggle request fails with HTTP 403, an error toast shows the `error` message and the column, its cards, and its Done/Active state stay as they were.
 
 ### FRONT-026 AddCardForm.tsx
 `AddCardForm.tsx` MUST let a user add a card to one column. It is a Client Component.
@@ -966,10 +1014,17 @@ The backend suite MUST test authentication and board-scoped authorization.
 - **TEST-003-AC01** A parametrized test asserts HTTP 401 with no token for every protected endpoint.
 - **TEST-003-AC02** A test asserts HTTP 401 for an expired token.
 - **TEST-003-AC03** A parametrized test asserts HTTP 404 for a non-member on every board-scoped endpoint.
-- **TEST-003-AC04** **Blocked by UD-05.** A parametrized test asserts HTTP 403 for a non-administrator member on every administrator-only operation.
-- **TEST-003-AC05** A parametrized test asserts HTTP 403 for a non-administrator member on each approved administrator-only operation: setting `is_done` on a column (UD-12) and `POST /api/boards/{id}/members` (UD-24).
+- **TEST-003-AC04** A parametrized test asserts HTTP 403 for a non-administrator member, with a valid body, on each of the five administrator-only operations in Section 2.1, and asserts that the target rows are unchanged (approved, UD-05).
+- **TEST-003-AC05** A parametrized test asserts HTTP 403 for a non-administrator member on each of the five administrator-only operations when the body is invalid, empty, unchanged, or mixed with allowed fields. It includes an `is_done` value that is invalid, an `is_done` value equal to the stored value, `name` together with `is_done`, an empty board name, and a member-add body with a missing `email` or an extra `role` field. It asserts that no field changed.
 - **TEST-003-AC06** A test asserts that Flask returns HTTP 401 when the JWT is supplied only in a cookie.
 - **TEST-003-AC07** A test asserts that `GET /api/boards/{id}` reports the role `administrator` for the board creator and `member` for a user added through `POST /api/boards/{id}/members`.
+- **TEST-003-AC08** A parametrized test asserts that a Board Administrator succeeds at each of the five administrator-only operations (HTTP 200, or 201 for member add) and that each effect is visible afterward.
+- **TEST-003-AC09** A parametrized test with a user who is an administrator of board A and a member of board B asserts success on board A and HTTP 403 with no change on board B for each of the five operations.
+- **TEST-003-AC10** A parametrized test asserts that, for each of the five administrator-only operations and each member-allowed operation, the status and body returned to a non-member are identical to those returned for a resource ID that does not exist.
+- **TEST-003-AC11** A parametrized test asserts that a Board Member who is not an administrator succeeds at each member-allowed operation listed in BOARD-006-AC04.
+- **TEST-003-AC12** A parametrized test over the actor roles administrator and member asserts that a non-owner receives HTTP 403 when editing or deleting another user's comment, and that an owner receives HTTP 200, with the comment unchanged after each 403.
+- **TEST-003-AC13** A parametrized test asserts that a rejected mutation (HTTP 400, 403, 404, or 409) on each mutating endpoint leaves a before-and-after snapshot of all rows, including `updated_at`, unchanged and creates no activity event or notification.
+- **TEST-003-AC14** Tests assert the check order in Section 2.4: no token with an invalid body returns 401, a non-member with an administrator-only request returns 404, a member with an administrator-only request and an invalid body returns 403, an administrator with an invalid body returns 400, a duplicate member returns 409, and an unparseable JSON body returns 400 for any caller.
 
 ### TEST-004 Position and analytics tests
 The backend suite MUST test FLOAT positioning and analytics.
@@ -981,6 +1036,7 @@ The backend suite MUST test FLOAT positioning and analytics.
 - **TEST-004-AC04** Tests cover the `completed_at` rules in CARD-002-AC06, CARD-005-AC07 to AC11, and COLUMN-002-AC08 and AC09, the `is_done` rules in COLUMN-002-AC05 to AC07, and the column model in COLUMN-005-AC01 to AC03.
 - **TEST-004-AC05** Tests cover the activity events in ANALYTICS-006-AC01 to AC08.
 - **TEST-004-AC06** Tests cover BOARD-007-AC01 to AC10.
+- **TEST-004-AC07** Tests cover the `is_done` rules in COLUMN-002-AC11 to AC14: an unchanged or repeated `is_done` leaves every card's `completed_at` unchanged and creates no event or notification, a changed value applies the completion rules in one transaction, and a forced failure leaves the column and its cards unchanged.
 
 ### TEST-005 Frontend component tests
 The frontend MUST have React Testing Library tests for its components and hooks.
@@ -993,7 +1049,7 @@ The frontend MUST have React Testing Library tests for its components and hooks.
 - **TEST-005-AC05** A test verifies that `useDragAndDrop` rolls back a card move when the API call fails.
 - **TEST-005-AC06** Tests cover the session layer and the proxy route handlers in FRONT-023-AC01 to AC08, AC11, AC13, and AC14, using a mocked Flask API.
 - **TEST-005-AC07** Tests cover `AuthContext.updateProfile()` in FRONT-018-AC06 to AC08.
-- **TEST-005-AC08** Tests cover the Done/Active toggle in FRONT-025-AC09 to AC15: visibility by role, the request body, the success state, rollback on failure, and the analytics refresh.
+- **TEST-005-AC08** Tests cover the Done/Active toggle and the delete control in FRONT-025-AC09 to AC17: visibility by role, the request body, the success state, rollback on failure, the analytics refresh, and a 403 response.
 
 ### TEST-006 Playwright suite rules
 Playwright end-to-end tests MUST run against the deployed Vercel frontend.
@@ -1038,10 +1094,10 @@ Playwright MUST verify layouts at mobile and desktop widths.
 - **TEST-009-AC02** At both widths, on each page in Section 4.2, the document's scroll width does not exceed its client width.
 
 ### TEST-010 Deletion and retention tests
-The backend pytest suite MUST cover soft deletion of columns and cards, preservation of card foreign keys, hard deletion of boards, and activity-event retention (approved, UD-18 and UD-23). These tests run against PostgreSQL.
+The backend pytest suite MUST cover soft deletion of columns and cards, preservation of card foreign keys, hard deletion of boards, activity-event retention (approved, UD-18 and UD-23), and the administrator-only authorization of column and board deletion (approved, UD-05). These tests run against PostgreSQL.
 
 **Acceptance criteria**
-- **TEST-010-AC01** A test deletes a column that holds 3 non-deleted cards and asserts HTTP 200, a non-null `deleted_at` on the column and on all 3 cards, and identical `deleted_at` values (COLUMN-003-AC03, AC04).
+- **TEST-010-AC01** A test, acting as a Board Administrator, deletes a column that holds 3 non-deleted cards and asserts HTTP 200, a non-null `deleted_at` on the column and on all 3 cards, and identical `deleted_at` values (COLUMN-003-AC03, AC04).
 - **TEST-010-AC02** A test asserts that, after the deletion, all card rows and the column row still exist and every card keeps its `column_id` (COLUMN-003-AC06), and that the database has a non-null foreign key from the card's `column_id` to the column (CARD-001-AC09).
 - **TEST-010-AC03** A test forces a failure between marking the column and marking its cards and asserts that the column and all its cards are unchanged (COLUMN-003-AC07).
 - **TEST-010-AC04** A test deletes a column that holds one previously soft-deleted card and asserts that the card keeps its original `deleted_at` (COLUMN-003-AC05).
@@ -1051,6 +1107,10 @@ The backend pytest suite MUST cover soft deletion of columns and cards, preserva
 - **TEST-010-AC08** A test hard-deletes a board that holds every kind of dependent row, including soft-deleted columns and cards, comments, notifications, memberships, and activity events. It asserts HTTP 200, zero remaining dependent rows, and that another board and all users are untouched (BOARD-005-AC04 to AC07).
 - **TEST-010-AC09** A test runs a sequence of creates, moves, column deletions, and card deletions and then asserts that no card with a null `deleted_at` references a column with a non-null `deleted_at` (CARD-001-AC10).
 - **TEST-010-AC10** A test asserts that the Flask URL map contains no restore or undelete route (COLUMN-003-AC12).
+- **TEST-010-AC11** A test sends `DELETE /api/columns/{id}` as a Board Member who is not an administrator and asserts HTTP 403 and that the column, every card of the column, and all their `deleted_at`, `updated_at`, and `column_id` values are unchanged and no activity event exists (COLUMN-003-AC13).
+- **TEST-010-AC12** A test asserts that a Board Member's `DELETE /api/columns/{id}` on an already soft-deleted column returns HTTP 404 and not 403, and that no `deleted_at` value changes (COLUMN-003-AC09, Section 2.4).
+- **TEST-010-AC13** A test with a user who is an administrator of another board and a member of the column's board asserts HTTP 403 and no change (COLUMN-003-AC14).
+- **TEST-010-AC14** A test sends `DELETE /api/boards/{id}` as a Board Member who is not an administrator and asserts HTTP 403 and that the board and every dependent row, including soft-deleted columns and cards, are unchanged (BOARD-005-AC03).
 
 ## 6. Non-Functional Requirements
 
@@ -1196,6 +1256,10 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | BOARD-006 | BOARD-006-AC01 | Shared board-authorization helper (service layer) |
 | BOARD-006 | BOARD-006-AC02 | Shared board-authorization helper (service layer) |
 | BOARD-006 | BOARD-006-AC03 | Administrator-only authorization decorator or helper |
+| BOARD-006 | BOARD-006-AC04 | Shared board-authorization helper (service layer) |
+| BOARD-006 | BOARD-006-AC05 | Shared board-authorization helper (service layer) |
+| BOARD-006 | BOARD-006-AC06 | Shared board-authorization helper (service layer) |
+| BOARD-006 | BOARD-006-AC07 | Shared board-authorization helper and service layer transactions |
 | BOARD-007 | BOARD-007-AC01 | POST /api/boards/{id}/members |
 | BOARD-007 | BOARD-007-AC02 | POST /api/boards/{id}/members (administrator check) |
 | BOARD-007 | BOARD-007-AC03 | POST /api/boards/{id}/members (board isolation) |
@@ -1220,6 +1284,10 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COLUMN-002 | COLUMN-002-AC08 | PATCH /api/columns/{id} (service layer) |
 | COLUMN-002 | COLUMN-002-AC09 | PATCH /api/columns/{id} (service layer) |
 | COLUMN-002 | COLUMN-002-AC10 | PATCH /api/columns/{id} (soft-delete guard) |
+| COLUMN-002 | COLUMN-002-AC11 | PATCH /api/columns/{id} (administrator check) |
+| COLUMN-002 | COLUMN-002-AC12 | PATCH /api/columns/{id} (service layer) |
+| COLUMN-002 | COLUMN-002-AC13 | PATCH /api/columns/{id} (service layer) |
+| COLUMN-002 | COLUMN-002-AC14 | PATCH /api/columns/{id} (transaction boundary) |
 | COLUMN-003 | COLUMN-003-AC01 | DELETE /api/columns/{id} |
 | COLUMN-003 | COLUMN-003-AC02 | DELETE /api/columns/{id} |
 | COLUMN-003 | COLUMN-003-AC03 | DELETE /api/columns/{id} (service layer) |
@@ -1232,6 +1300,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COLUMN-003 | COLUMN-003-AC10 | PATCH /api/columns/{id}, POST /api/columns/{id}/cards, and card routes (soft-delete guard) |
 | COLUMN-003 | COLUMN-003-AC11 | DELETE /api/columns/{id} (service layer) |
 | COLUMN-003 | COLUMN-003-AC12 | Flask URL map (route registration) |
+| COLUMN-003 | COLUMN-003-AC13 | DELETE /api/columns/{id} (administrator check) |
+| COLUMN-003 | COLUMN-003-AC14 | DELETE /api/columns/{id} (administrator check per board) |
 | COLUMN-004 | COLUMN-004-AC01 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC02 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC03 | PATCH /api/boards/{id}/columns/reorder |
@@ -1316,6 +1386,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COMMENT-003 | COMMENT-003-AC05 | PATCH /api/comments/{id} |
 | COMMENT-003 | COMMENT-003-AC06 | PATCH /api/comments/{id} |
 | COMMENT-003 | COMMENT-003-AC07 | PATCH /api/comments/{id} (soft-delete guard) |
+| COMMENT-003 | COMMENT-003-AC08 | PATCH /api/comments/{id} (ownership check) |
+| COMMENT-003 | COMMENT-003-AC09 | PATCH /api/comments/{id} (ownership check) |
 | COMMENT-004 | COMMENT-004-AC01 | DELETE /api/comments/{id} |
 | COMMENT-004 | COMMENT-004-AC02 | DELETE /api/comments/{id} (ownership check) |
 | COMMENT-004 | COMMENT-004-AC03 | DELETE /api/comments/{id} (ownership check) |
@@ -1323,6 +1395,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COMMENT-004 | COMMENT-004-AC05 | DELETE /api/comments/{id} |
 | COMMENT-004 | COMMENT-004-AC06 | DELETE /api/comments/{id} (service layer) |
 | COMMENT-004 | COMMENT-004-AC07 | DELETE /api/comments/{id} (soft-delete guard) |
+| COMMENT-004 | COMMENT-004-AC08 | DELETE /api/comments/{id} (ownership check) |
 | NOTIF-001 | NOTIF-001-AC01 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC02 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC03 | GET /api/notifications |
@@ -1481,6 +1554,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-025 | FRONT-025-AC13 | ColumnHeader.tsx and Page /boards/[id] (board view container) |
 | FRONT-025 | FRONT-025-AC14 | ColumnHeader.tsx |
 | FRONT-025 | FRONT-025-AC15 | Page /boards/[id] (analytics panel) |
+| FRONT-025 | FRONT-025-AC16 | ColumnHeader.tsx and Page /boards/[id] (board view container) |
+| FRONT-025 | FRONT-025-AC17 | ColumnHeader.tsx and Page /boards/[id] (board view container) |
 | FRONT-026 | FRONT-026-AC01 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC02 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC03 | AddCardForm.tsx |
@@ -1566,12 +1641,20 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-003 | TEST-003-AC05 | Backend pytest suite (authorization) |
 | TEST-003 | TEST-003-AC06 | Backend pytest suite (authorization) |
 | TEST-003 | TEST-003-AC07 | Backend pytest suite (authorization) |
+| TEST-003 | TEST-003-AC08 | Backend pytest suite (authorization) |
+| TEST-003 | TEST-003-AC09 | Backend pytest suite (authorization) |
+| TEST-003 | TEST-003-AC10 | Backend pytest suite (authorization) |
+| TEST-003 | TEST-003-AC11 | Backend pytest suite (authorization) |
+| TEST-003 | TEST-003-AC12 | Backend pytest suite (comment ownership) |
+| TEST-003 | TEST-003-AC13 | Backend pytest suite (atomicity) |
+| TEST-003 | TEST-003-AC14 | Backend pytest suite (authorization check order) |
 | TEST-004 | TEST-004-AC01 | Backend pytest suite (card position) |
 | TEST-004 | TEST-004-AC02 | Backend pytest suite (card model) |
 | TEST-004 | TEST-004-AC03 | Backend pytest suite (analytics) |
 | TEST-004 | TEST-004-AC04 | Backend pytest suite (completion timestamps) |
 | TEST-004 | TEST-004-AC05 | Backend pytest suite (activity events) |
 | TEST-004 | TEST-004-AC06 | Backend pytest suite (membership extension) |
+| TEST-004 | TEST-004-AC07 | Backend pytest suite (is_done idempotency) |
 | TEST-005 | TEST-005-AC01 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC02 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC03 | Frontend test suite (card search) |
@@ -1612,6 +1695,10 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-010 | TEST-010-AC08 | Backend pytest suite (board hard delete) |
 | TEST-010 | TEST-010-AC09 | Backend pytest suite (soft-delete invariant) |
 | TEST-010 | TEST-010-AC10 | Backend pytest suite (endpoint coverage test) |
+| TEST-010 | TEST-010-AC11 | Backend pytest suite (column deletion authorization) |
+| TEST-010 | TEST-010-AC12 | Backend pytest suite (column deletion authorization) |
+| TEST-010 | TEST-010-AC13 | Backend pytest suite (column deletion authorization) |
+| TEST-010 | TEST-010-AC14 | Backend pytest suite (board deletion authorization) |
 | NFR-001 | NFR-001-AC01 | User model and password hashing (service layer) |
 | NFR-001 | NFR-001-AC02 | Flask logging configuration |
 | NFR-002 | NFR-002-AC01 | Repository (secret scan procedure in README) |
@@ -1663,12 +1750,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Proposal:** No refresh token. An expired session returns the user to `/login`.
 - **Rationale:** Simplest option that meets the expiry requirement. A refresh token adds storage and revocation work.
 - **Affects:** AUTH-003, API-005.
-
-### UD-05 Administrator-only operations
-- **Already approved as administrator-only:** setting `is_done` on a column (UD-12) and `POST /api/boards/{id}/members` (UD-24).
-- **Proposal for the remaining operations:** `PATCH /api/boards/{id}` and `DELETE /api/boards/{id}` are administrator-only. All other board-scoped operations are open to members. Administrators have no override on comments: only the comment owner may edit or delete a comment (COMMENT-003, COMMENT-004).
-- **Rationale:** Board-level changes are the narrowest meaning of "management". Column and card work is routine for all members. The comment rule comes from the assignment.
-- **Affects:** BOARD-004, BOARD-005, BOARD-006, BOARD-007, TEST-003.
 
 ### UD-06 Float rebalancing
 - **Proposal:** When the gap between two neighboring positions falls below a small threshold, renumber the siblings in that column in a single transaction.
@@ -1753,6 +1834,20 @@ These decisions were approved by the human reviewer. They are requirements, not 
 - **Rationale:** A new board needs an administrator, and registration should not create a session without a login step.
 - **Governs:** FRONT-001, BOARD-001, BOARD-007.
 - **Still open:** The password policy (UD-21).
+
+### UD-05 Administrator-only operations and authorization order [Approved]
+- **Decision:**
+  - Exactly five operations are administrator-only: `PATCH /api/boards/{id}` (rename board), `DELETE /api/boards/{id}` (delete board), `POST /api/boards/{id}/members` (add member), `PATCH /api/columns/{id}` when the body contains `is_done` (change completion status), and `DELETE /api/columns/{id}` (soft-delete the column and its active cards).
+  - Board members and administrators may both view boards, columns, cards, comments, and analytics, create and rename columns, reorder columns, create, edit, move, reorder, and delete cards, and create comments.
+  - Any authenticated user may create a board and becomes its administrator.
+  - Comment ownership applies equally to administrators and members. Users may edit or delete only their own comments, and administrators have no override.
+  - Permissions are board-specific. Being an administrator of board A grants nothing on board B.
+  - Authorization checks run in this order: 401 for missing or invalid authentication, uniform 404 for a missing resource or a non-member, 403 for a member without permission, then 400 or 409 for validation or conflict. The full rules, including the framework-level parsing exception, are in Section 2.4.
+  - A non-administrator whose PATCH body contains `is_done` receives 403 before field validation, even when the value is invalid or unchanged. A mixed body of `name` and `is_done` from a non-administrator is rejected as a whole with 403 and no change.
+  - When an administrator sends an `is_done` value equal to the column's stored value, the completion-state update is a no-op: no `completed_at` is reset, and no activity event or notification is created. Unrelated fields are applied only when they are present and valid. When the value changes, the completion timestamp rules of UD-12 and A-13 apply in one transaction.
+- **Rationale:** Board-level and destructive column operations are the narrowest meaning of "management". Column and card work is routine for all members. The comment rule comes from the assignment. A fixed check order and a no-op for an unchanged `is_done` keep unauthorized users from learning anything about validation and keep repeated requests from rewriting completion times.
+- **Governs:** Sections 2.1 and 2.4, BOARD-004, BOARD-005, BOARD-006, BOARD-007, COLUMN-002, COLUMN-003, COMMENT-003, COMMENT-004, FRONT-006, FRONT-025, TEST-003, TEST-004, TEST-005, TEST-010.
+- **Note:** Column reorder (`PATCH /api/boards/{id}/columns/reorder`) is not in the administrator-only list, so every board member may use it.
 
 ### UD-10 Search fields and scope [Approved]
 - **Decision:** Card search filters card titles within the current board, in the browser, using the board data already loaded from `GET /api/boards/{id}`.
@@ -1862,22 +1957,22 @@ These decisions were approved by the human reviewer. They are requirements, not 
 | Category | Name | Requirements | Acceptance criteria |
 |---|---|---|---|
 | AUTH | Authentication | 4 | 17 |
-| BOARD | Board management and membership | 7 | 39 |
-| COLUMN | Column management | 5 | 38 |
+| BOARD | Board management and membership | 7 | 43 |
+| COLUMN | Column management | 5 | 44 |
 | CARD | Card management and positioning | 7 | 54 |
-| COMMENT | Comments | 4 | 25 |
+| COMMENT | Comments | 4 | 28 |
 | NOTIF | Notifications | 3 | 12 |
 | ANALYTICS | Board analytics | 6 | 31 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 151 |
+| FRONT | Frontend pages and components | 26 | 153 |
 | API | API client and response format | 7 | 26 |
-| TEST | Testing | 10 | 60 |
+| TEST | Testing | 10 | 72 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **92** | **497** |
+| **Total** | | **92** | **524** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 9 (UD-03, UD-04, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
-- Unresolved design decisions (all [Proposed, not approved]): 15.
-- Acceptance criteria blocked by an unresolved decision: 13. Blocking decisions: UD-05: 4; UD-08: 2; UD-14: 7.
+- Approved decisions: 10 (UD-03, UD-04, UD-05, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 14.
+- Acceptance criteria blocked by an unresolved decision: 9. Blocking decisions: UD-08: 2; UD-14: 7.
