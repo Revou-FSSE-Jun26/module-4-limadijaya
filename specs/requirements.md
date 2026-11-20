@@ -17,7 +17,7 @@ RevoTask lets authenticated users manage boards, columns, and cards. Cards can b
 ### 1.3 Conventions
 - **MUST** marks a mandatory requirement. **MAY** marks an optional behavior.
 - **[Approved]** means the item comes from `PROJECT_BRIEF.md`, the assignment, or an explicit project decision.
-- **[Proposed, not approved]** means the item is a suggestion awaiting a decision. Proposals appear only in Section 8.1, in the status-code table in Section 2.3, and in the derived assumptions in Section 1.4.
+- **[Proposed, not approved]** means the item is a suggestion awaiting a decision. Proposals appear only in Section 8.1 and in the derived assumptions in Section 1.4. Every row of the status-code table in Section 2.3 is approved.
 - **[Approved]** decisions that were settled by human review are listed in Section 8.2 (Approved Decisions). They are requirements.
 - **[Extension]** marks functionality outside the 26 mandatory endpoints. The only extension is `POST /api/boards/{id}/members` (BOARD-007), approved in UD-24.
 - Requirement IDs use the form `CATEGORY-NNN`. Acceptance criterion IDs use the form `CATEGORY-NNN-ACnn`.
@@ -81,6 +81,9 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 - All endpoints are under `/api` and exchange JSON.
 - A successful response body is `{ "data": ... }`. An error response body is `{ "error": "<message>" }`. [Approved]
 - Every endpoint except `POST /api/auth/register`, `POST /api/auth/login`, and `GET /api/health` requires a valid JWT. [Approved]
+- A success response never contains an `error` key, an error response never contains a `data` key, the `error` value is a non-empty string, and every response that has a body uses `Content-Type: application/json`. [Approved, UD-19]
+- A successful POST that creates a resource returns the created resource, and a successful PATCH returns the complete updated public resource. A successful DELETE returns `{ "data": { "id": "<uuid>" } }` with HTTP 200 and never HTTP 204. A successful GET that lists resources returns an array in `data`, which is `[]` when the list is empty. No success response contains a password, a password hash, or a token other than the `access_token` of the login response. [Approved, UD-19]
+- The response contracts of three endpoints are still pending and are exceptions to the general body rules above until they are decided: the reorder response of `PATCH /api/boards/{id}/columns/reorder` (UD-20), any addition to the response of `PATCH /api/cards/{id}/position` (UD-06), and the pagination shape of `GET /api/notifications` (UD-09). A more specific approved endpoint rule always overrides these general rules. [Approved, UD-19]
 
 | Status | Situation | Label |
 |---|---|---|
@@ -93,17 +96,19 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 404 | An operation targets a soft-deleted column or a soft-deleted card (the rule for their comments is in the approved A-15) | Approved (UD-18, UD-23) |
 | 409 | A user who is already a member of the board is added to that board again | Approved (A-14) |
 | 404 | An email that belongs to no registered user is added to a board | Approved (A-13) |
-| 200 | Successful read, update, or delete | Proposed, not approved (UD-19) |
-| 201 | Successful creation of a user, board, column, or card | Proposed, not approved (UD-19) |
-| 400 | Any other request validation failure | Proposed, not approved (UD-19) |
-| 401 | Login with invalid credentials | Proposed, not approved (UD-19) |
+| 200 | Successful GET, PATCH, or DELETE, successful login, successful notification mark-as-read, and the health check | Approved (UD-19) |
+| 201 | Successful registration, board creation, column creation, card creation, comment creation, and board-member addition | Approved (UD-19) |
+| 400 | Any other request validation failure, including a request body that is not valid JSON | Approved (UD-19) |
+| 401 | Invalid or unknown login credentials | Approved (UD-19) |
 | 404 | A notification belongs to another user, with the same status and body as a notification that does not exist | Approved (UD-08) |
 | 400 | `assignee_id` names a user who does not exist or is not a member of the card's board, with an identical body for both cases | Approved (UD-08) |
 | 400 | `assignee_id` is sent when creating a card | Approved (UD-08) |
 | 400 | A member sends any query parameter to `GET /api/boards/{id}/analytics` | Approved (UD-14) |
-| 404 | Resource does not exist | Proposed, not approved (UD-19) |
-| 409 | Registration or profile update with an email already in use | Proposed, not approved (UD-19) |
-| 500 | Unhandled server error | Proposed, not approved (UD-19) |
+| 404 | A resource that does not exist, or a route that does not match | Approved (UD-19) |
+| 405 | A method that the route does not support (framework-level, Section 2.4) | Approved (UD-19) |
+| 409 | Registration or profile update with an email already in use | Approved (UD-19) |
+| 415 | An unsupported content type (framework-level, Section 2.4) | Approved (UD-19) |
+| 500 | Unhandled server error, with a generic message that exposes no stack trace, SQL statement, token, or internal exception detail | Approved (UD-19) |
 
 ### 2.4 Authorization check order [Approved, UD-05]
 Every protected resource operation MUST apply these checks in this order and stop at the first one that fails:
@@ -172,13 +177,14 @@ The 26 endpoints above are mandatory and are unchanged. The table below lists ap
 - **AUTH-001-AC05** If the email is not a syntactically valid email address, the request returns HTTP 400.
 
 ### AUTH-002 User login
-`POST /api/auth/login` MUST exchange valid credentials for a JWT.
+`POST /api/auth/login` MUST exchange valid credentials for a JWT. The response is HTTP 200 with `{ "data": { "access_token": "<jwt>" } }` (approved, UD-19). The response is consumed by the Next.js authentication handler on the server and never by browser code (FRONT-023). It contains no refresh token, and no authentication endpoint is added to the Flask API. The Next.js server MAY derive the session expiry from the JWT `exp` claim, and the session interface MAY expose a non-sensitive `expires_at` value to the browser, but never the JWT. The token lifetime (UD-01) and the refresh policy (UD-02) are not decided here.
 
 **Acceptance criteria**
-- **AUTH-002-AC01** Given the email and password of a registered user, the request returns HTTP 200 and `data` contains a non-empty access token string.
+- **AUTH-002-AC01** Given the email and password of a registered user, the request returns HTTP 200 and `data` is exactly `{ "access_token": "<jwt>" }`, where the value is a non-empty JWT string.
 - **AUTH-002-AC02** Given a registered email and a wrong password, the request returns HTTP 401 with an `error` message and no token.
 - **AUTH-002-AC03** Given an unregistered email, the request returns HTTP 401 with the same `error` message as AUTH-002-AC02, so the response does not reveal whether the email exists.
 - **AUTH-002-AC04** If `email` or `password` is missing, the request returns HTTP 400.
+- **AUTH-002-AC05** The successful login response has no key other than `access_token` in `data`, and in particular no `refresh_token`, no user profile, and no password or hash. The URL map contains no token-refresh route.
 
 ### AUTH-003 JWT expiry and rejection
 Access tokens MUST carry an expiry. Protected endpoints MUST reject missing, invalid, and expired tokens with HTTP 401. The token lifetime and refresh strategy are unresolved (UD-01, UD-02).
@@ -247,7 +253,7 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 `DELETE /api/boards/{id}` MUST hard-delete a board (approved, UD-18). Only a Board Administrator of the board may delete it (approved, UD-05). The same transaction MUST remove every dependent row: memberships, columns (including soft-deleted ones), cards (including soft-deleted ones), comments, notifications that refer to the board or its cards, and activity events of the board. Users are not deleted. The deletion order or foreign-key strategy MUST be defined explicitly in the schema or the service, and MUST NOT depend on database defaults.
 
 **Acceptance criteria**
-- **BOARD-005-AC01** A Board Administrator receives HTTP 200, and a following `GET /api/boards/{id}` by that user returns HTTP 404.
+- **BOARD-005-AC01** A Board Administrator receives HTTP 200 with `data` exactly `{ "id": "<the deleted board's ID>" }` (approved, UD-19), and a following `GET /api/boards/{id}` by that user returns HTTP 404.
 - **BOARD-005-AC02** An authenticated user who is not a member receives HTTP 404, the response is identical to the one for a board that does not exist, and the board still exists.
 - **BOARD-005-AC03** A Board Member who is not an administrator of the board receives HTTP 403 (approved, UD-05), and the board and all its dependent rows (memberships, columns, cards, comments, notifications, activity events) are unchanged.
 - **BOARD-005-AC04** For a board that holds every kind of dependent row, the request returns HTTP 200, and afterward no membership, column, card, comment, notification, or activity-event row that belongs to the board remains in the database. The dependent rows include columns and cards that were already soft-deleted.
@@ -317,7 +323,7 @@ Membership and administrator status MUST be evaluated per board. The same check 
 `DELETE /api/columns/{id}` MUST soft-delete a column and all of its currently active cards in one database transaction (approved, UD-18 and UD-23). Only a Board Administrator of the column's board may delete a column (approved, UD-05). The column and the affected cards MUST receive the same UTC `deleted_at` timestamp. The column row and the foreign key from each card to its column MUST be preserved: the column is not hard-deleted and its cards are not cascade-deleted. No endpoint restores a soft-deleted column or card.
 
 **Acceptance criteria**
-- **COLUMN-003-AC01** A Board Administrator receives HTTP 200, and `GET /api/boards/{id}` no longer lists the column.
+- **COLUMN-003-AC01** A Board Administrator receives HTTP 200 with `data` exactly `{ "id": "<the deleted column's ID>" }` (approved, UD-19), and `GET /api/boards/{id}` no longer lists the column.
 - **COLUMN-003-AC02** A non-member of the column's board receives HTTP 404, the response is identical to the one for a column that does not exist, and the column still exists.
 - **COLUMN-003-AC03** Deleting a column that contains 3 non-deleted cards returns HTTP 200, and afterward the column row and all 3 card rows still exist with a non-null `deleted_at`.
 - **COLUMN-003-AC04** The column and the affected cards have identical `deleted_at` values, and the value is a UTC timestamp.
@@ -406,7 +412,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 `DELETE /api/cards/{id}` MUST remove a card from all views by setting `deleted_at` to the UTC time of the request (approved, UD-18). The card row, its `column_id`, its `completed_at`, its comments, and its activity events are kept. No endpoint restores a soft-deleted card.
 
 **Acceptance criteria**
-- **CARD-004-AC01** A member receives HTTP 200, and `GET /api/boards/{id}` no longer lists the card.
+- **CARD-004-AC01** A member receives HTTP 200 with `data` exactly `{ "id": "<the deleted card's ID>" }` (approved, UD-19), and `GET /api/boards/{id}` no longer lists the card.
 - **CARD-004-AC02** After deletion, the card row still exists in the database with a non-null `deleted_at`.
 - **CARD-004-AC03** After deletion, the card is absent from `GET /api/cards?assignee=me`.
 - **CARD-004-AC04** A non-member of the card's board receives HTTP 404 and the card is unchanged.
@@ -496,7 +502,7 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 `DELETE /api/comments/{id}` MUST allow only the comment owner to delete a comment. Ownership applies equally to Board Administrators and Board Members: an administrator has no override on another user's comment (approved, UD-05).
 
 **Acceptance criteria**
-- **COMMENT-004-AC01** The owner receives HTTP 200, and the comment is absent from `GET /api/cards/{id}/comments`.
+- **COMMENT-004-AC01** The owner receives HTTP 200 with `data` exactly `{ "id": "<the deleted comment's ID>" }` (approved, UD-19), and the comment is absent from `GET /api/cards/{id}/comments`.
 - **COMMENT-004-AC02** An authenticated board member who is not the comment owner receives HTTP 403 and the comment still exists.
 - **COMMENT-004-AC03** A Board Administrator who is not the comment owner receives HTTP 403 and the comment still exists.
 - **COMMENT-004-AC04** A request with no token returns HTTP 401.
@@ -680,10 +686,17 @@ The service layer MUST record an append-only activity event, in the same databas
 ### 3.9 API behavior (API)
 
 ### API-001 Success response envelope
-Every successful JSON response MUST use the `{ "data": ... }` envelope.
+Every successful JSON response MUST use the `{ "data": ... }` envelope and the status conventions of Section 2.3 (approved, UD-19). The endpoint-specific response contracts that are still pending (the reorder response of UD-20, any addition to the position response of UD-06, and the notification list pagination of UD-09) are exceptions to criteria AC04 and AC06 below until those decisions are made, and a more specific approved rule always overrides a general one here.
 
 **Acceptance criteria**
 - **API-001-AC01** For every endpoint in Section 3.0, a successful response body is a JSON object with a top-level `data` key and no `error` key.
+- **API-001-AC02** Every successful request returns HTTP 200 for a GET, a PATCH, and a DELETE, and also for login, notification mark-as-read, and the health check. It never returns HTTP 204.
+- **API-001-AC03** `POST /api/auth/register`, `POST /api/boards`, `POST /api/boards/{id}/columns`, `POST /api/columns/{id}/cards`, `POST /api/cards/{id}/comments`, and `POST /api/boards/{id}/members` each return HTTP 201 on success, and `data` is the created resource, which contains its `id` (for the member extension, the added user's `id`).
+- **API-001-AC04** Every successful PATCH other than the reorder endpoint returns HTTP 200 and a `data` object that contains the resource's `id` and the new value of every field the request changed. Every key that `data` shares with a following GET representation of the same resource has the same value there.
+- **API-001-AC05** Every successful `DELETE /api/boards/{id}`, `DELETE /api/columns/{id}`, `DELETE /api/cards/{id}`, and `DELETE /api/comments/{id}` returns HTTP 200 and `data` is exactly `{ "id": "<the ID of the deleted resource>" }`. A repeated delete of a deleted board, of a soft-deleted column or card, or of a deleted comment still returns the HTTP 404 required by the criteria of that resource.
+- **API-001-AC06** `GET /api/boards`, `GET /api/cards?assignee=me`, and `GET /api/cards/{id}/comments` return `data` as a JSON array, and `[]` when there are no results, never null and never omitted. `GET /api/notifications` is excluded until UD-09 defines its pagination contract.
+- **API-001-AC07** Every API response that has a body, whether success or error, has the header `Content-Type: application/json`.
+- **API-001-AC08** No successful response body contains a password, a password hash, or a JWT, except the `access_token` in the login response.
 
 ### API-002 Error response envelope
 Every error response MUST use the `{ "error": "..." }` envelope.
@@ -692,13 +705,16 @@ Every error response MUST use the `{ "error": "..." }` envelope.
 - **API-002-AC01** Responses with status 400, 401, 403, and 404 each have a body that is a JSON object with a top-level `error` string and no `data` key.
 - **API-002-AC02** A request to a route that does not exist returns HTTP 404 with a JSON `error` body, not an HTML page.
 - **API-002-AC03** An unhandled exception returns HTTP 500 with a JSON `error` body that does not contain a stack trace or file path.
+- **API-002-AC04** Responses with status 405, 409, 415, and 500, like those with 400, 401, 403, and 404, have a body that is a JSON object with a top-level `error` string and no `data` key. For every error status the `error` value is a non-empty string, including validation failures (approved, UD-19).
+- **API-002-AC05** The `error` text of an HTTP 500 response is a generic message that is the same for every kind of unhandled exception, and it contains no stack trace, file path, SQL statement, token, exception class name, or other internal detail (approved, UD-19).
 
 ### API-003 Health check
-`GET /api/health` MUST report that the API is running.
+`GET /api/health` MUST report that the API is running, with HTTP 200 and `{ "data": { "status": "ok" } }` (approved, UD-19). It performs no database check and returns no dependency diagnostics, version information, or environment details.
 
 **Acceptance criteria**
-- **API-003-AC01** A request with no token returns HTTP 200 and a body with a top-level `data` key.
+- **API-003-AC01** A request with no token returns HTTP 200, and the body is exactly `{ "data": { "status": "ok" } }`.
 - **API-003-AC02** The endpoint is reachable on the deployed Render URL over HTTPS.
+- **API-003-AC03** A request to the endpoint executes no database query, and the body contains no key other than `status`.
 
 ### API-004 Cross-origin access
 The API MUST accept direct browser requests from the deployed Vercel frontend origin and reject other origins. With the approved cookie architecture (UD-03), authenticated requests reach Flask only from the Next.js server and never from browser code. Direct browser requests are limited to `GET /api/health` (API-005-AC08). Flask MUST NOT allow credentialed cross-origin requests.
@@ -1078,6 +1094,7 @@ The Next.js server MUST keep the JWT in an HttpOnly cookie, read it only through
 - **API-005-AC07** When the network request fails, the call rejects with the network error type from `errors.ts`.
 - **API-005-AC08** Direct browser mode (`NEXT_PUBLIC_API_BASE_URL`) is used only for `GET /api/health`. A test finds that no other endpoint is requested in this mode.
 - **API-005-AC09** Server-side and client-side modes expose the same call signature and both resolve with the `data` value.
+- **API-005-AC10** A successful DELETE call resolves with an object whose `id` equals the deleted resource's ID, and the client never treats an empty body or an HTTP 204 as a successful delete (approved, UD-19).
 
 ### API-006 errors.ts
 `errors.ts` MUST define the frontend error types.
@@ -1104,6 +1121,8 @@ The backend MUST have a pytest suite that covers every endpoint in Section 3.0.
 - **TEST-001-AC01** Running `pytest` in the backend exits with code 0.
 - **TEST-001-AC02** A test compares the Flask URL map with the endpoint list in Section 3.0 (the 26 mandatory endpoints and the approved membership extension). It fails if a listed endpoint is missing or has no test, or if the map contains any other route under `/api`.
 - **TEST-001-AC03** The test configuration uses a database separate from the production Supabase database.
+- **TEST-001-AC04** A parametrized contract test covers each of the 27 endpoints (the 26 mandatory endpoints and the approved extension) and asserts the success status of Section 2.3, the `{ "data": ... }` envelope with no `error` key, the `Content-Type: application/json` header, and the `data` type (an object, or an array for the three list endpoints of API-001-AC06). It asserts the exact bodies of the login response (`{ "access_token": ... }`), the health response (`{ "status": "ok" }`), and the four delete responses (`{ "id": ... }`, with a repeated delete returning 404 and no HTTP 204). The three pending contracts of API-001 are excluded.
+- **TEST-001-AC05** Tests assert the error envelope for each of the statuses 400, 401, 403, 404, 405, 409, 415, and 500: the body is a JSON object with a non-empty `error` string and no `data` key. They trigger 405 with an unsupported method, 415 with an unsupported content type, and 500 through a failing route that exists only in the test configuration, and assert that the 500 message is generic and contains no stack trace, SQL, token, or exception class name (API-002-AC04, AC05).
 
 ### TEST-002 Comment response tests
 The backend suite MUST test the comment status codes.
@@ -1349,6 +1368,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | AUTH-002 | AUTH-002-AC02 | POST /api/auth/login |
 | AUTH-002 | AUTH-002-AC03 | POST /api/auth/login |
 | AUTH-002 | AUTH-002-AC04 | POST /api/auth/login |
+| AUTH-002 | AUTH-002-AC05 | POST /api/auth/login (response schema) |
 | AUTH-003 | AUTH-003-AC01 | Flask-JWT-Extended configuration (token expiry setting) |
 | AUTH-003 | AUTH-003-AC02 | Flask-JWT-Extended error handlers |
 | AUTH-003 | AUTH-003-AC03 | Flask-JWT-Extended error handlers |
@@ -1640,11 +1660,21 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | USER-002 | USER-002-AC05 | PATCH /api/users/me |
 | USER-002 | USER-002-AC06 | PATCH /api/users/me |
 | API-001 | API-001-AC01 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC02 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC03 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC04 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC05 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC06 | Flask response helper (shared success serializer) |
+| API-001 | API-001-AC07 | Flask response helper and error handlers |
+| API-001 | API-001-AC08 | Flask response helper (shared success serializer) |
 | API-002 | API-002-AC01 | Flask error handlers |
 | API-002 | API-002-AC02 | Flask error handlers (404) |
 | API-002 | API-002-AC03 | Flask error handlers (500) |
+| API-002 | API-002-AC04 | Flask error handlers |
+| API-002 | API-002-AC05 | Flask error handlers (500) |
 | API-003 | API-003-AC01 | GET /api/health |
 | API-003 | API-003-AC02 | GET /api/health (deployed on Render) |
+| API-003 | API-003-AC03 | GET /api/health |
 | API-004 | API-004-AC01 | Flask CORS configuration |
 | API-004 | API-004-AC02 | Flask CORS configuration |
 | API-004 | API-004-AC03 | Backend `.env.example` and Flask CORS configuration |
@@ -1841,6 +1871,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | API-005 | API-005-AC07 | apiClient.ts |
 | API-005 | API-005-AC08 | apiClient.ts |
 | API-005 | API-005-AC09 | apiClient.ts |
+| API-005 | API-005-AC10 | apiClient.ts |
 | API-006 | API-006-AC01 | errors.ts |
 | API-006 | API-006-AC02 | errors.ts |
 | API-006 | API-006-AC03 | errors.ts |
@@ -1850,6 +1881,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-001 | TEST-001-AC01 | Backend pytest suite |
 | TEST-001 | TEST-001-AC02 | Backend pytest suite (endpoint coverage test) |
 | TEST-001 | TEST-001-AC03 | Backend test configuration (pytest fixtures) |
+| TEST-001 | TEST-001-AC04 | Backend pytest suite (response contract) |
+| TEST-001 | TEST-001-AC05 | Backend pytest suite (error envelope) |
 | TEST-002 | TEST-002-AC01 | Backend pytest suite (comments) |
 | TEST-002 | TEST-002-AC02 | Backend pytest suite (comments) |
 | TEST-002 | TEST-002-AC03 | Backend pytest suite (comments) |
@@ -1975,7 +2008,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 
 ## 8. Design Decisions
 
-This section records design decisions. Section 8.1 lists unresolved decisions. Every entry there is **[Proposed, not approved]**. A proposal is a suggestion for discussion and is not a requirement. Section 8.2 lists the **Approved Decisions**. They were settled by human review and are requirements. Entries UD-01 to UD-17 come from the Open Questions in `PROJECT_BRIEF.md` (Question 6, on per-board roles, is resolved by the board-specific authorization constraint and is no longer open). Entries UD-18 to UD-24 were found while writing and reviewing this document. UD-18 and UD-23 are approved and are listed in Section 8.2 with their original IDs.
+This section records design decisions. Section 8.1 lists unresolved decisions. Every entry there is **[Proposed, not approved]**. A proposal is a suggestion for discussion and is not a requirement. Section 8.2 lists the **Approved Decisions**. They were settled by human review and are requirements. Entries UD-01 to UD-17 come from the Open Questions in `PROJECT_BRIEF.md` (Question 6, on per-board roles, is resolved by the board-specific authorization constraint and is no longer open). Entries UD-18 to UD-24 were found while writing and reviewing this document. UD-18, UD-19, and UD-23 are approved and are listed in Section 8.2 with their original IDs.
 
 ### 8.1 Unresolved decisions
 
@@ -2018,11 +2051,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Proposal:** A GitHub Actions workflow runs pytest and the frontend tests on each pull request. Playwright runs after deployment.
 - **Rationale:** Runs the fast tests before merge and the deployed-URL tests only once a deployment exists.
 - **Affects:** TEST-001, TEST-005, TEST-006.
-
-### UD-19 Status-code and response-body conventions
-- **Proposal:** Use the proposed rows in the table in Section 2.3. Return `{ "data": ... }` with HTTP 200 for delete requests.
-- **Rationale:** Standard REST conventions. Only the rows labeled "Approved" in that table come from the assignment.
-- **Affects:** All backend requirements.
 
 ### UD-20 Column reorder request and response shape
 - **Proposal:** The request body carries a list of column IDs, each with its new positive float `order`. The response returns the board's columns in the new order.
@@ -2148,6 +2176,17 @@ These decisions were approved by the human reviewer. They are requirements, not 
 - **Rationale:** Soft deletion keeps the card-to-column foreign key and the activity history intact. A board is a self-contained tree, so deleting it removes everything below it.
 - **Governs:** BOARD-003, BOARD-005, COLUMN-003, COLUMN-005, CARD-001, CARD-004, COMMENT-004, ANALYTICS-002, ANALYTICS-003, ANALYTICS-006, TEST-010.
 
+### UD-19 Status-code and response-body conventions [Approved]
+- **Decision:**
+  - **Envelopes.** All successful responses use `{ "data": ... }` and all error responses use `{ "error": "<non-empty message>" }`. A success response has no `error` key, an error response has no `data` key, and JSON responses use `Content-Type: application/json`. The authorization and validation precedence of UD-05 and Section 2.4 is unchanged.
+  - **Statuses.** 200 for successful GET, PATCH, and DELETE, login, notification mark-as-read, and the health check. 201 for successful registration, board creation, column creation, card creation, comment creation, and board-member addition. 400 for request validation failures, including the already approved special cases. 401 for a missing, invalid, or expired JWT and for invalid or unknown login credentials. 403 for a board member attempting an administrator-only operation and for a non-owner editing or deleting another user's comment. 404 for missing resources, inaccessible boards and resources (uniform for non-members), soft-deleted cards and columns, notifications of other users, and an unregistered email in member addition. 409 for a duplicate registration email, a duplicate profile email, and duplicate board membership. 405 and 415 keep the framework-level exception of Section 2.4 and use the error envelope. 500 for an unhandled server error with a generic message that exposes no stack trace, SQL statement, token, or internal exception detail. A more specific approved rule overrides a general one.
+  - **Success bodies.** A successful POST that creates a resource returns the created resource. A successful PATCH returns the complete updated public resource. A successful DELETE returns HTTP 200 with `{ "data": { "id": "<uuid>" } }` and never HTTP 204, for boards, columns, cards, and comments, and a repeated delete still returns the 404 that the existing criteria require. A GET that lists resources returns an array, and `[]` when empty, except where a specialized contract is approved or still pending. No success body exposes a password, a password hash, or internal-only data, and the only token ever returned is the login `access_token`.
+  - **Login.** `POST /api/auth/login` returns HTTP 200 with `{ "data": { "access_token": "<jwt>" } }`. It adds no refresh token and no authentication endpoint, the Next.js server consumes it, and the raw JWT is never exposed to the browser. The Next.js server may derive the session expiry from the JWT `exp` claim, and the session interface may expose a non-sensitive `expires_at` value.
+  - **Health.** `GET /api/health` returns HTTP 200 with `{ "data": { "status": "ok" } }` and performs no database check.
+  - **Deferred.** The reorder response (UD-20), the position rebalance and any addition to the position response (UD-06), the notification pagination shape (UD-09), the token lifetime (UD-01), the refresh policy (UD-02), the password-length policy (UD-21), and the naming of position versus order are not decided here.
+- **Rationale:** One envelope, one status per kind of outcome, and one delete shape let the API client, the tests, and the Next.js proxy treat every endpoint the same way. Returning the resource ID on delete keeps the `{ "data": ... }` envelope valid without HTTP 204 and gives the client the ID to remove from its state.
+- **Governs:** Section 2.3, API-001, API-002, API-003, API-005, AUTH-002, BOARD-005, COLUMN-003, CARD-004, COMMENT-004, TEST-001.
+
 ### UD-23 Cards in a deleted column [Approved]
 - **Decision:**
   - Deleting a column soft-deletes the column and all its currently active cards in one database transaction.
@@ -2209,7 +2248,7 @@ These decisions were approved by the human reviewer. They are requirements, not 
 
 | Category | Name | Requirements | Acceptance criteria |
 |---|---|---|---|
-| AUTH | Authentication | 4 | 17 |
+| AUTH | Authentication | 4 | 18 |
 | BOARD | Board management and membership | 7 | 48 |
 | COLUMN | Column management | 5 | 44 |
 | CARD | Card management and positioning | 7 | 62 |
@@ -2218,14 +2257,14 @@ These decisions were approved by the human reviewer. They are requirements, not 
 | ANALYTICS | Board analytics | 6 | 53 |
 | USER | User profile | 2 | 9 |
 | FRONT | Frontend pages and components | 26 | 182 |
-| API | API client and response format | 7 | 26 |
-| TEST | Testing | 11 | 90 |
+| API | API client and response format | 7 | 37 |
+| TEST | Testing | 11 | 92 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **93** | **632** |
+| **Total** | | **93** | **646** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 12 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-14, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
-- Unresolved design decisions (all [Proposed, not approved]): 12.
+- Approved decisions: 13 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-14, UD-18, UD-19, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 11.
 - Acceptance criteria blocked by an unresolved decision: 0. Blocking decisions: none.
