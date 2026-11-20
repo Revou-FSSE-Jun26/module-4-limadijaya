@@ -27,11 +27,11 @@ RevoTask lets authenticated users manage boards, columns, and cards. Cards can b
 ### 1.4 Derived assumptions (to confirm)
 These inferences are embedded in acceptance criteria. They are not open questions, but they are not stated verbatim in the brief. Confirm or correct them.
 
-- **A-01** A new column or card is appended after the existing ones in its parent, with a positive float position greater than every non-deleted sibling.
+- **A-01** A new column or card is appended after the existing ones in its parent, with a positive float `order` (stored in the `position` attribute) greater than the `order` of every non-deleted sibling.
 - **A-02** `GET /api/boards/{id}` returns the board with its columns and non-deleted cards, because the required endpoint set has no separate list endpoints for columns or cards.
 - **A-03** `DELETE /api/cards/{id}` is a soft delete that sets `deleted_at`. This is implied by the required `deleted_at` field on Card. The deletion scope for the other entities (boards, columns, comments) is approved in UD-18 and UD-23.
-- **A-04** Field names in request bodies: board `name`, column `name`, card `title`, comment `content`, user `name`, `email`, and `password`. Card position requests use `column_id` and `order`. The card assignment field is `assignee_id`: a UUID string to assign or `null` to unassign, accepted only by `PATCH /api/cards/{id}` and never by card creation (approved, UD-08).
-- **A-05** Comments are listed by `created_at` ascending. Notifications are listed newest first.
+- **A-04** Field names in request bodies: board `name`, column `name`, card `title`, comment `content`, user `name`, `email`, and `password`. Card position requests use `column_id` and `order`. Column reorder requests use a `columns` list whose entries have `id` and `order` (approved, UD-20). The public JSON field for a stored position is `order` in every request and response, while the database column and the SQLAlchemy model attribute are `position` and the endpoint path `/api/cards/{id}/position` is unchanged (approved, UD-20). The card assignment field is `assignee_id`: a UUID string to assign or `null` to unassign, accepted only by `PATCH /api/cards/{id}` and never by card creation (approved, UD-08).
+- **A-05** Comments are listed by `created_at` ascending. Notifications are listed newest first. Columns, and the cards of a column, are listed by ascending `order`.
 - **A-06** A request body containing a field that the endpoint does not accept is rejected with HTTP 400. This includes `password` on `PATCH /api/users/me`.
 - **A-07** The JWT is held only in an HttpOnly cookie managed by the Next.js server layer (approved, UD-03). Browser JavaScript never reads or sends the JWT. The Next.js server forwards it to Flask as `Authorization: Bearer <token>`, which is the Flask-JWT-Extended default.
 - **A-08** A successful login redirects to `/`.
@@ -83,7 +83,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 - Every endpoint except `POST /api/auth/register`, `POST /api/auth/login`, and `GET /api/health` requires a valid JWT. [Approved]
 - A success response never contains an `error` key, an error response never contains a `data` key, the `error` value is a non-empty string, and every response that has a body uses `Content-Type: application/json`. [Approved, UD-19]
 - A successful POST that creates a resource returns the created resource, and a successful PATCH returns the complete updated public resource. A successful DELETE returns `{ "data": { "id": "<uuid>" } }` with HTTP 200 and never HTTP 204. A successful GET that lists resources returns an array in `data`, which is `[]` when the list is empty. No success response contains a password, a password hash, or a token other than the `access_token` of the login response. [Approved, UD-19]
-- The response contracts of three endpoints are still pending and are exceptions to the general body rules above until they are decided: the reorder response of `PATCH /api/boards/{id}/columns/reorder` (UD-20), any addition to the response of `PATCH /api/cards/{id}/position` (UD-06), and the pagination shape of `GET /api/notifications` (UD-09). A more specific approved endpoint rule always overrides these general rules. [Approved, UD-19]
+- The reorder response of `PATCH /api/boards/{id}/columns/reorder` is a specific approved contract: an array of all active columns in ascending `order` (UD-20, COLUMN-004). The response contracts of two endpoints are still pending and are exceptions to the general body rules above until they are decided: any addition to the response of `PATCH /api/cards/{id}/position` (UD-06) and the pagination shape of `GET /api/notifications` (UD-09). A more specific approved endpoint rule always overrides these general rules. [Approved, UD-19 and UD-20]
 
 | Status | Situation | Label |
 |---|---|---|
@@ -106,6 +106,8 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 400 | A member sends any query parameter to `GET /api/boards/{id}/analytics` | Approved (UD-14) |
 | 404 | A resource that does not exist, or a route that does not match | Approved (UD-19) |
 | 405 | A method that the route does not support (framework-level, Section 2.4) | Approved (UD-19) |
+| 400 | A reorder request lists a column ID that does not exist, belongs to another board, or is soft-deleted, with an identical body for all three cases | Approved (UD-20) |
+| 409 | A reorder request whose final `order` values collide with an active column that the request does not list | Approved (UD-20) |
 | 409 | Registration or profile update with an email already in use | Approved (UD-19) |
 | 415 | An unsupported content type (framework-level, Section 2.4) | Approved (UD-19) |
 | 500 | Unhandled server error, with a generic message that exposes no stack trace, SQL statement, token, or internal exception detail | Approved (UD-19) |
@@ -227,7 +229,7 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 `GET /api/boards/{id}` MUST return the board with its columns, its cards, and its members to its members. The member list is part of this response and populates the card assignee selector. No separate member-list endpoint exists (approved, UD-08 and UD-24).
 
 **Acceptance criteria**
-- **BOARD-003-AC01** A member receives HTTP 200 with the board, its columns ordered by ascending position, and each column's cards ordered by ascending position.
+- **BOARD-003-AC01** A member receives HTTP 200 with the board, its columns ordered by ascending `order`, and each column's cards ordered by ascending `order`.
 - **BOARD-003-AC02** Cards with a non-null `deleted_at` are absent from the response.
 - **BOARD-003-AC03** An authenticated user who is not a member receives HTTP 404 with an `error` message.
 - **BOARD-003-AC04** A request for a board ID that does not exist returns HTTP 404 with the same `error` message as BOARD-003-AC03.
@@ -295,10 +297,11 @@ Membership and administrator status MUST be evaluated per board. The same check 
 `POST /api/boards/{id}/columns` MUST create a column in the board.
 
 **Acceptance criteria**
-- **COLUMN-001-AC01** Given a non-empty `name`, the request returns HTTP 201 and `data` contains a UUID `id`, the `name`, and a positive float position.
-- **COLUMN-001-AC02** The new column's position is greater than the position of every non-deleted column in the board (A-01).
+- **COLUMN-001-AC01** Given a non-empty `name`, the request returns HTTP 201 and `data` contains a UUID `id`, the `name`, and a positive float `order`.
+- **COLUMN-001-AC02** The new column's `order` is greater than the `order` of every non-deleted column in the board (A-01).
 - **COLUMN-001-AC03** A missing or empty `name` returns HTTP 400 and no column is created.
 - **COLUMN-001-AC04** A non-member of the board receives HTTP 404.
+- **COLUMN-001-AC05** Creating a column acquires the same board row lock as the reorder endpoint and computes the new `order` after taking it, so a column creation that runs concurrently with a reorder never produces two active columns with the same `order` (approved, UD-20).
 
 ### COLUMN-002 Rename column
 `PATCH /api/columns/{id}` MUST update a column's name for any board member. It MUST also let a Board Administrator mark or unmark the column as a done (completed) column through a boolean `is_done` field (approved, UD-12; field name in A-13). A request whose body contains the `is_done` key is an administrator-only operation (approved, UD-05). For a Board Member who is not an administrator, the key alone triggers HTTP 403 before any field is validated, whatever its value. When an administrator sends an `is_done` value equal to the column's stored value, the completion-state update is a no-op (approved, UD-05).
@@ -337,17 +340,51 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-003-AC12** The URL map contains no route that restores or undeletes a column or a card.
 - **COLUMN-003-AC13** A Board Member who is not an administrator of the column's board receives HTTP 403 (approved, UD-05). The column row, every card of the column, and all their `deleted_at` values, `updated_at` values, and `column_id` values are unchanged, and no activity event is created.
 - **COLUMN-003-AC14** A user who is an administrator of another board and only a member of the column's board receives HTTP 403, and nothing changes.
+- **COLUMN-003-AC15** Deleting a column takes the same board row lock as the reorder endpoint, so a deletion that runs concurrently with a reorder of the same board never leaves a changed `order` on the soft-deleted column and never fails with a server error (approved, UD-20).
 
 ### COLUMN-004 Reorder columns
-`PATCH /api/boards/{id}/columns/reorder` MUST persist a new column order using positive FLOAT order values. The request and response shape is unresolved (UD-20).
+`PATCH /api/boards/{id}/columns/reorder` MUST persist a new column order using positive FLOAT `order` values (approved, UD-20). It adds no endpoint, and any authenticated board member may call it, because it is not one of the five administrator-only operations. The request body is a JSON object with exactly the key `columns`, a non-empty array whose entries each have exactly `id` (a UUID) and `order` (a positive, finite JSON number):
+
+```json
+{ "columns": [ { "id": "<column-uuid>", "order": 1536.0 } ] }
+```
+
+A partial list is allowed. Each column ID and each `order` value may appear at most once in the request. After authentication and the board membership check, the service layer takes a row lock on the board, re-reads the board's active columns, applies the submitted values in memory, and validates that the final `order` values of all active columns are positive, finite, and pairwise distinct. It then writes all changes in one transaction. A submitted value that collides with an unlisted active column returns HTTP 409, and unlisted columns are never renumbered silently. The success response is HTTP 200 with every active column of the board in ascending `order`:
+
+```json
+{ "data": [ { "id": "<column-uuid>", "name": "To Do", "order": 1024.0, "is_done": false } ] }
+```
+
+A request whose values all equal the stored values is a no-op. An ordinary drag sends only the moved column with a value between its neighbors. When no distinct value exists between two neighbors, the frontend may normalize by sending every active column it has loaded, each once, through this same endpoint. There is no flag, endpoint, or response field for normalization, and the server treats such a request like any other (see the limitation in AC27).
 
 **Acceptance criteria**
-- **COLUMN-004-AC01** A valid reorder request from a member returns HTTP 200, and a following `GET /api/boards/{id}` lists the columns in the requested order.
-- **COLUMN-004-AC02** An order value of 0, a negative number, or a non-numeric value returns HTTP 400 and no order value changes.
-- **COLUMN-004-AC03** A request that references a column ID not belonging to the board returns HTTP 400 and no order value changes.
-- **COLUMN-004-AC04** A non-member of the board receives HTTP 404.
+- **COLUMN-004-AC01** A valid reorder request from any board member returns HTTP 200, and a following `GET /api/boards/{id}` lists the active columns in ascending `order`, using the submitted value for each listed column and the stored value for every unlisted column.
+- **COLUMN-004-AC02** An `order` that is 0, a negative number, a boolean, a string, null, `NaN`, `Infinity`, or a value that cannot be stored as a finite positive float (for example `1e400`, which parses as infinity, or `1e-400`, which parses as 0) returns HTTP 400, never HTTP 500, and no `order` value changes. No maximum `order` value is imposed.
+- **COLUMN-004-AC03** A request that lists a column ID that does not exist, that belongs to another board, or that is soft-deleted returns HTTP 400 with the same generic `error` body for all three cases, so the response does not reveal whether the column exists, and no `order` value changes.
+- **COLUMN-004-AC04** A non-member of the board receives HTTP 404, and the response is identical to the one for a board that does not exist.
 - **COLUMN-004-AC05** The Column position attribute is declared as a SQLAlchemy `db.Float` column.
-- **COLUMN-004-AC06** A request that lists a soft-deleted column returns HTTP 400 and no order value changes (approved, A-15). The `order` values of soft-deleted columns are never modified.
+- **COLUMN-004-AC06** A request that lists a soft-deleted column returns HTTP 400 and no `order` value changes (approved, A-15), with the same response as in AC03. The `order` values of soft-deleted columns are never modified.
+- **COLUMN-004-AC07** The request body must be a JSON object with exactly the key `columns`, a non-empty array of entries that each have exactly `id` and `order`. A body that is not valid JSON, is not an object, lacks `columns`, has an empty or non-array `columns`, has an extra top-level key (such as `name`), or has an entry with an extra key (such as `name`, `is_done`, or `position`) returns HTTP 400 and no column changes.
+- **COLUMN-004-AC08** An entry whose `id` is not a valid UUID returns HTTP 400, and a request that contains the same column `id` twice returns HTTP 400. No column changes in either case.
+- **COLUMN-004-AC09** A request that contains the same `order` value for two entries returns HTTP 400 and no column changes.
+- **COLUMN-004-AC10** With three active columns A (1024.0), B (2048.0), and C (3072.0), a request with the single entry C at 1536.0 returns HTTP 200, and a following `GET /api/boards/{id}` lists A, C, B. The `order` and `updated_at` of A and B are unchanged.
+- **COLUMN-004-AC11** A request that lists two columns applies both new `order` values together. A request that exchanges the `order` values of two columns succeeds and does not count as a collision.
+- **COLUMN-004-AC12** A submitted `order` that equals the stored `order` of an active column that the request does not list returns HTTP 409 with an `error` message, and no column changes.
+- **COLUMN-004-AC13** After every successful request, the `order` values of all active columns are positive, finite, and pairwise distinct, and every unlisted column keeps its exact stored `order`: an ordinary partial request never renumbers other columns.
+- **COLUMN-004-AC14** The changes of one request are atomic. When a failure is forced after some columns were updated, no `order` value is changed afterward, and a request rejected with 400 or 409 changes nothing.
+- **COLUMN-004-AC15** The service takes a row lock on the board (a `SELECT ... FOR UPDATE` on the board row) before it reads the board's active columns, and it validates against the columns read after the lock.
+- **COLUMN-004-AC16** When two requests run concurrently and each sets a different column to the same final `order`, exactly one returns HTTP 200 and the other HTTP 409, and the final `order` values are pairwise distinct. Two concurrent requests that do not collide both return HTTP 200, and both changes are present afterward.
+- **COLUMN-004-AC17** A reorder that runs concurrently with the creation or deletion of a column on the same board is serialized with it: the active columns never share an `order`, no `order` is written to a soft-deleted column, and a request that names a column soft-deleted by the earlier transaction returns HTTP 400.
+- **COLUMN-004-AC18** The HTTP 200 response contains every active column of the board, not only the submitted ones, in ascending `order`, and no soft-deleted column. Each entry contains at least `id`, `name`, `order` (a positive float), and `is_done`, and no key named `position`, `deleted_at`, or `rebalanced`.
+- **COLUMN-004-AC19** The `id`, `name`, `order`, and `is_done` values in the response equal the values of the same columns in a following `GET /api/boards/{id}`.
+- **COLUMN-004-AC20** When every submitted `order` equals the stored value, the response is HTTP 200 with the complete array, no column row is updated (the recorded SQL has no `UPDATE` of columns), and no `updated_at` changes.
+- **COLUMN-004-AC21** Only a column whose `order` changed gets a new `updated_at`, equal to the time of the request. The other columns keep their `updated_at`.
+- **COLUMN-004-AC22** A reorder creates no activity event and no notification, and it changes no `is_done`, `completed_at`, or `deleted_at` value.
+- **COLUMN-004-AC23** A Board Administrator and a Board Member who is not an administrator both receive HTTP 200 for a valid request, and a member never receives HTTP 403.
+- **COLUMN-004-AC24** A request with no token returns HTTP 401 even when the body is invalid. A non-member with an invalid body receives HTTP 404, and a member with an invalid body receives HTTP 400 (Section 2.4).
+- **COLUMN-004-AC25** The public field is `order`: the response and `GET /api/boards/{id}` expose the stored `position` as `order`, and a request entry that uses the key `position` instead of `order` returns HTTP 400 (A-06).
+- **COLUMN-004-AC26** A request that lists every active column of the board exactly once with pairwise distinct positive values is applied like any other request: it returns HTTP 200 with the complete array, and the request contains no normalization flag.
+- **COLUMN-004-AC27** Limitation of the shared payload: the server cannot tell a full normalization request from an ordinary partial request that lists every column. It detects only these stale cases, and in each nothing is applied: a listed column that was soft-deleted or does not exist returns HTTP 400, and a value that collides with a column the request does not list returns HTTP 409. A column that another user added after the client loaded the board is not detected: the request succeeds when the final values are distinct, and the added column keeps its stored `order`.
 
 ### COLUMN-005 Column data model
 The Column model MUST define a Boolean `is_done` field that marks a done (completed) column (approved, UD-12 and A-13). It MUST also define a nullable UTC `deleted_at` timestamp for soft deletion (approved, UD-18).
@@ -359,11 +396,12 @@ The Column model MUST define a Boolean `is_done` field that marks a done (comple
 - **COLUMN-005-AC04** Introspection of the Column model shows `deleted_at` is a nullable, timezone-aware date-time column, and a newly created column has `deleted_at` equal to null.
 - **COLUMN-005-AC05** A Flask-Migrate migration adds `deleted_at`, `flask db upgrade` completes without error, and on a database with existing columns every existing column gets `deleted_at` equal to null.
 - **COLUMN-005-AC06** No column response includes `deleted_at` as a non-null value, because soft-deleted columns are never returned by any endpoint.
+- **COLUMN-005-AC07** Every column representation in an API response contains `order`, equal to the stored `position` value, and contains no key named `position` (approved, UD-20).
 
 ### 3.4 Card management and positioning (CARD)
 
 ### CARD-001 Card data model
-The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nullable UTC `deleted_at`, a position stored with `db.Column(db.Float)`, a nullable `completed_at` timestamp (approved, UD-12), and a non-null foreign key `column_id` that references the Column model (approved, UD-23). Cards are soft-deleted (approved, UD-18).
+The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nullable UTC `deleted_at`, a `position` attribute stored with `db.Column(db.Float)` (exposed through the API as `order`), a nullable `completed_at` timestamp (approved, UD-12), and a non-null foreign key `column_id` that references the Column model (approved, UD-23). Cards are soft-deleted (approved, UD-18).
 
 **Acceptance criteria**
 - **CARD-001-AC01** A newly created card has a primary key that parses as a valid UUID, and the key is generated without client input.
@@ -376,13 +414,14 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **CARD-001-AC08** Introspection of the Card model shows `deleted_at` is a nullable, timezone-aware date-time column.
 - **CARD-001-AC09** Introspection of the database created by `flask db upgrade` shows a non-null foreign key from the card's `column_id` to the Column model's primary key.
 - **CARD-001-AC10** After any sequence of the endpoints in Section 3.0, no card with a null `deleted_at` references a column with a non-null `deleted_at`.
+- **CARD-001-AC11** Every card representation in an API response contains `order`, equal to the stored `position` value, and contains no key named `position` (approved, UD-20).
 
 ### CARD-002 Create card
 `POST /api/columns/{id}/cards` MUST create a card in the column.
 
 **Acceptance criteria**
-- **CARD-002-AC01** Given a non-empty `title`, the request returns HTTP 201 and `data` contains a UUID `id`, the `title`, the column ID, and a positive float position.
-- **CARD-002-AC02** The new card's position is greater than the position of every non-deleted card in the column (A-01).
+- **CARD-002-AC01** Given a non-empty `title`, the request returns HTTP 201 and `data` contains a UUID `id`, the `title`, the column ID, and a positive float `order`.
+- **CARD-002-AC02** The new card's `order` is greater than the `order` of every non-deleted card in the column (A-01).
 - **CARD-002-AC03** A missing or empty `title` returns HTTP 400 and no card is created.
 - **CARD-002-AC04** A non-member of the column's board receives HTTP 404.
 - **CARD-002-AC05** A column ID that does not exist returns HTTP 404.
@@ -423,10 +462,10 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **CARD-004-AC09** After deletion, every notification that refers to the card remains in its recipient's `GET /api/notifications` and can still be marked as read (approved, UD-08).
 
 ### CARD-005 Move card (position update)
-`PATCH /api/cards/{id}/position` MUST move a card to a column and position. Positions MUST be positive float values.
+`PATCH /api/cards/{id}/position` MUST move a card to a column and an `order`. The `order` MUST be a positive float value, which the service layer stores in the card's `position` attribute.
 
 **Acceptance criteria**
-- **CARD-005-AC01** Given a valid UUID `column_id` of a column on the card's board and a positive float `order`, the request returns HTTP 200, and `GET /api/boards/{id}` lists the card in that column with that position.
+- **CARD-005-AC01** Given a valid UUID `column_id` of a column on the card's board and a positive float `order`, the request returns HTTP 200, and `GET /api/boards/{id}` lists the card in that column with that `order`.
 - **CARD-005-AC02** An `order` of 0 or any negative number returns HTTP 400 and the card is unchanged.
 - **CARD-005-AC03** An `order` that is missing or not numeric returns HTTP 400 and the card is unchanged.
 - **CARD-005-AC04** A `column_id` that is missing or not a valid UUID returns HTTP 400 and the card is unchanged.
@@ -585,7 +624,7 @@ The events that do not notify are: card creation, card unassignment, assigning a
 - **ANALYTICS-001-AC02** A non-member receives HTTP 404.
 - **ANALYTICS-001-AC03** A request with no token returns HTTP 401.
 - **ANALYTICS-001-AC04** `window` has exactly the keys `start` and `end`. Both are UTC ISO 8601 timestamps in the form `YYYY-MM-DDTHH:MM:SSZ`. `start` is a Monday at 00:00:00 UTC, `end` is exactly 7 days after `start`, and the server's current UTC time satisfies `start <= now < end`.
-- **ANALYTICS-001-AC05** Each `cards_per_column` entry has exactly the keys `column_id` (a UUID string), `name`, and `card_count` (an integer of at least 0), and the entries are ordered by ascending column position.
+- **ANALYTICS-001-AC05** Each `cards_per_column` entry has exactly the keys `column_id` (a UUID string), `name`, and `card_count` (an integer of at least 0), and the entries are ordered by ascending column `order`.
 - **ANALYTICS-001-AC06** `completed_this_week` is an integer of at least 0.
 - **ANALYTICS-001-AC07** Each `member_activity` entry has exactly the keys `user_id` (a UUID string), `name`, and `activity_count` (an integer of at least 0). The entries are ordered by `activity_count` descending, then `name` ascending, then `user_id` ascending. No entry contains an email address or any other private profile field.
 - **ANALYTICS-001-AC08** For a board that has no columns, `cards_per_column` is `[]`, `completed_this_week` is 0, and `member_activity` has one entry for each current board member with `activity_count` 0 when no qualifying events exist. No key is omitted and no value is null.
@@ -599,7 +638,7 @@ The analytics MUST include the number of cards in each column.
 - **ANALYTICS-002-AC02** Cards with a non-null `deleted_at` are not counted.
 - **ANALYTICS-002-AC03** Soft-deleted columns are absent from the per-column result, and cards that were soft-deleted with their column are not counted anywhere (approved, UD-18 and UD-23).
 - **ANALYTICS-002-AC04** After a column holding 3 cards is deleted, the response lists one column fewer and the total number of counted cards drops by 3.
-- **ANALYTICS-002-AC05** `cards_per_column` lists every non-soft-deleted column of the board in ascending position order, with `card_count` equal to the number of its non-soft-deleted cards, and a column without cards appears with `card_count` 0. The counts are a snapshot of the current state and do not depend on the reporting window.
+- **ANALYTICS-002-AC05** `cards_per_column` lists every non-soft-deleted column of the board in ascending `order`, with `card_count` equal to the number of its non-soft-deleted cards, and a column without cards appears with `card_count` 0. The counts are a snapshot of the current state and do not depend on the reporting window.
 
 ### ANALYTICS-003 Cards completed this week
 The analytics MUST include `completed_this_week`: the number of non-soft-deleted cards in non-soft-deleted done columns whose current `completed_at` lies inside the reporting window (`window_start <= completed_at < window_end`, UTC; approved, UD-14). Each card counts at most once. The count uses the current `completed_at` only and does not reconstruct completions from activity events, and no completion history is stored. For a non-deleted card in a non-deleted column, `completed_at` is non-null if and only if the column is marked done (UD-12, A-13). A card in a column that was newly marked done counts as completed this week, even if the card was created months earlier. A card completed twice counts once, with its latest `completed_at`.
@@ -686,13 +725,13 @@ The service layer MUST record an append-only activity event, in the same databas
 ### 3.9 API behavior (API)
 
 ### API-001 Success response envelope
-Every successful JSON response MUST use the `{ "data": ... }` envelope and the status conventions of Section 2.3 (approved, UD-19). The endpoint-specific response contracts that are still pending (the reorder response of UD-20, any addition to the position response of UD-06, and the notification list pagination of UD-09) are exceptions to criteria AC04 and AC06 below until those decisions are made, and a more specific approved rule always overrides a general one here.
+Every successful JSON response MUST use the `{ "data": ... }` envelope and the status conventions of Section 2.3 (approved, UD-19). The reorder endpoint has its own approved response (COLUMN-004). The endpoint-specific response contracts that are still pending (any addition to the position response of UD-06 and the notification list pagination of UD-09) are exceptions to criteria AC04 and AC06 below until those decisions are made, and a more specific approved rule always overrides a general one here.
 
 **Acceptance criteria**
 - **API-001-AC01** For every endpoint in Section 3.0, a successful response body is a JSON object with a top-level `data` key and no `error` key.
 - **API-001-AC02** Every successful request returns HTTP 200 for a GET, a PATCH, and a DELETE, and also for login, notification mark-as-read, and the health check. It never returns HTTP 204.
 - **API-001-AC03** `POST /api/auth/register`, `POST /api/boards`, `POST /api/boards/{id}/columns`, `POST /api/columns/{id}/cards`, `POST /api/cards/{id}/comments`, and `POST /api/boards/{id}/members` each return HTTP 201 on success, and `data` is the created resource, which contains its `id` (for the member extension, the added user's `id`).
-- **API-001-AC04** Every successful PATCH other than the reorder endpoint returns HTTP 200 and a `data` object that contains the resource's `id` and the new value of every field the request changed. Every key that `data` shares with a following GET representation of the same resource has the same value there.
+- **API-001-AC04** Every successful PATCH other than `PATCH /api/boards/{id}/columns/reorder` (whose array response is defined by COLUMN-004) returns HTTP 200 and a `data` object that contains the resource's `id` and the new value of every field the request changed. Every key that `data` shares with a following GET representation of the same resource has the same value there.
 - **API-001-AC05** Every successful `DELETE /api/boards/{id}`, `DELETE /api/columns/{id}`, `DELETE /api/cards/{id}`, and `DELETE /api/comments/{id}` returns HTTP 200 and `data` is exactly `{ "id": "<the ID of the deleted resource>" }`. A repeated delete of a deleted board, of a soft-deleted column or card, or of a deleted comment still returns the HTTP 404 required by the criteria of that resource.
 - **API-001-AC06** `GET /api/boards`, `GET /api/cards?assignee=me`, and `GET /api/cards/{id}/comments` return `data` as a JSON array, and `[]` when there are no results, never null and never omitted. `GET /api/notifications` is excluded until UD-09 defines its pagination contract.
 - **API-001-AC07** Every API response that has a body, whether success or error, has the header `Content-Type: application/json`.
@@ -815,7 +854,7 @@ The `/` page MUST be a Server Component that lists the user's boards using `Boar
 The `/boards/[id]` page MUST be a Server Component that fetches and displays a board's columns and cards, and it MUST render Client Components for editing, drag-and-drop, search, and modals. Mutations from Client Components go through the same-origin proxy.
 
 **Acceptance criteria**
-- **FRONT-006-AC01** Columns appear in ascending position order, and each column's cards appear in ascending position order.
+- **FRONT-006-AC01** Columns appear in ascending `order`, and each column's cards appear in ascending `order`.
 - **FRONT-006-AC02** A 404 response shows a "board not found" message and no board data.
 - **FRONT-006-AC03** Submitting a column name creates a column through `POST /api/boards/{id}/columns`, and the column appears after the existing columns.
 - **FRONT-006-AC04** Submitting a card title in a column's `AddCardForm` creates a card through `POST /api/columns/{id}/cards`, and the card appears in that column.
@@ -1026,11 +1065,17 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 **Acceptance criteria**
 - **FRONT-019-AC01** When a card is dropped on another column, the card appears in the target column before the API response arrives.
 - **FRONT-019-AC02** The drop calls `PATCH /api/cards/{id}/position` with the target `column_id` and a positive float `order`.
-- **FRONT-019-AC03** The `order` sent is strictly between the positions of the two neighboring cards. When dropped before the first card it is positive and less than the first card's position. When dropped after the last card it is greater than the last card's position. When dropped into an empty column it is positive.
-- **FRONT-019-AC04** If the API call fails with any non-2xx status or a network error, the card returns to its previous column and position and an error toast is shown.
+- **FRONT-019-AC03** The `order` sent is strictly between the `order` values of the two neighboring cards. When dropped before the first card it is positive and less than the first card's `order`. When dropped after the last card it is greater than the last card's `order`. When dropped into an empty column it is positive.
+- **FRONT-019-AC04** If the API call fails with any non-2xx status or a network error, the card returns to its previous column and its previous place in that column, and an error toast is shown.
 - **FRONT-019-AC05** Dropping a card at its original location sends no request.
-- **FRONT-019-AC06** Dragging a column calls `PATCH /api/boards/{id}/columns/reorder` with positive float order values, and a failed call restores the previous column order and shows an error toast.
+- **FRONT-019-AC06** Dragging a column calls `PATCH /api/boards/{id}/columns/reorder` with positive float `order` values in the body defined by COLUMN-004, and a failed call restores the previous column order and shows an error toast.
 - **FRONT-019-AC07** While a search filter hides some cards, a card dropped in a column gets an `order` computed from its neighbors among all cards in that column, including hidden ones.
+- **FRONT-019-AC08** An ordinary column drag sends one request whose `columns` list has exactly one entry: the moved column's `id` and its new `order`. That `order` is strictly between the `order` values of the two neighboring columns, less than the first column's `order` (and positive) when dropped first, and greater than the last column's `order` when dropped last. Dropping a column at its original place sends no request.
+- **FRONT-019-AC09** After a successful column reorder, the displayed columns are replaced by the `data` array of the response, in the order returned, so the page shows the server's authoritative `order` values.
+- **FRONT-019-AC10** When the request fails with HTTP 400 or 409, the previous column order is restored, an error toast is shown, and the frontend refetches the latest board state with `GET /api/boards/{id}` (through the server-rendered data or the proxy) and shows it.
+- **FRONT-019-AC11** When no distinct float lies strictly between the `order` values of the two neighboring columns (the midpoint equals one of them), the frontend sends one request that lists every active column it has loaded exactly once, with distinct positive `order` values that give the intended final order (for example 1024.0, 2048.0, and 3072.0). The request uses the same endpoint and body, with no flag.
+- **FRONT-019-AC12** An ordinary drag, whose neighbors have a distinct midpoint, never sends a normalization request, and no minimum gap threshold is applied.
+- **FRONT-019-AC13** When the normalization request fails with HTTP 400 or 409, no partial result is shown: the previous column order is restored, an error toast is shown, and the frontend refetches the latest board state.
 
 ### FRONT-020 useErrorHandler
 `useErrorHandler` MUST turn errors into user-visible messages.
@@ -1169,6 +1214,14 @@ The backend suite MUST test FLOAT positioning and analytics.
 - **TEST-004-AC10** Tests cover member activity in ANALYTICS-004-AC01 to AC11: boundary inclusion and exclusion, rollover, three distinct moves counting as three, zero counts for current members, inclusion of events of soft-deleted cards, columns, and comments, exclusion of events of other boards, exclusion of non-qualifying actions, members who joined mid-week, and users without a current membership.
 - **TEST-004-AC11** Tests cover the response contract in ANALYTICS-001-AC01 to AC09: the exact keys and value types, the UTC `Z` timestamp format, the ordering of `cards_per_column` and of `member_activity` including ties on `activity_count` and `name`, explicit empty arrays and zero counts for an empty board, the absence of email addresses, HTTP 400 for any query parameter, and the 401 and 404 precedence.
 - **TEST-004-AC12** A test seeds a board with cards in done and active columns, soft-deleted cards, a soft-deleted column, and events of several members and of another board, and asserts the full analytics response (the `window`, every `card_count`, `completed_this_week`, and every `activity_count`) against hand-computed expected values under a frozen clock.
+- **TEST-004-AC13** Tests cover a partial column reorder in COLUMN-004-AC10, AC11, and AC13: a single moved column, two columns at once, an exchange of two `order` values, and the exact preservation of unlisted columns. They also cover a full normalization request that lists every active column once (COLUMN-004-AC26).
+- **TEST-004-AC14** Tests cover the invalid requests in COLUMN-004-AC02, AC03, AC06, AC07, and AC08 with no change to any column: `order` values of 0, negative, boolean, string, null, `NaN`, `Infinity`, `1e400`, and `1e-400`, nonexistent, foreign-board, and soft-deleted column IDs with identical response bodies, malformed bodies and extra keys, invalid UUIDs, and duplicate IDs.
+- **TEST-004-AC15** Tests cover duplicate `order` values within a request (COLUMN-004-AC09, HTTP 400) and a collision with an unlisted active column (COLUMN-004-AC12, HTTP 409), and assert that no column changes in either case.
+- **TEST-004-AC16** A test forces a failure after some columns were updated and asserts that no column has a changed `order` afterward, and a test records the SQL to assert that the board row is locked with `FOR UPDATE` before the active columns are read (COLUMN-004-AC14, AC15).
+- **TEST-004-AC17** Tests run on separate database connections: two reorders that collide return one 200 and one 409, two reorders that do not collide both succeed, and a reorder that runs against a concurrent column creation or deletion never leaves duplicate `order` values or a changed `order` on a soft-deleted column (COLUMN-004-AC16, AC17, COLUMN-001-AC05, COLUMN-003-AC15).
+- **TEST-004-AC18** A test asserts that a no-op reorder returns HTTP 200 with the complete array, issues no column `UPDATE`, and leaves every `updated_at` unchanged. A test asserts that only a changed column gets a new `updated_at` (COLUMN-004-AC20, AC21).
+- **TEST-004-AC19** Tests assert the response contract of COLUMN-004-AC18 and AC19 and the `order` mapping of COLUMN-004-AC25, CARD-001-AC11, and COLUMN-005-AC07: no response of the reorder, board, column creation, card creation, or card position endpoints contains a `position` key, and each contains `order` equal to the stored `position` value.
+- **TEST-004-AC20** Tests assert that a reorder creates no activity event and no notification, that an administrator and a member both succeed, and that the check order of COLUMN-004-AC24 holds (COLUMN-004-AC22 to AC24).
 
 ### TEST-005 Frontend component tests
 The frontend MUST have React Testing Library tests for its components and hooks.
@@ -1218,7 +1271,7 @@ Playwright MUST cover the approved eight-step Kanban journey in a single test.
 - **TEST-008-AC04** Step 4: the test creates a uniquely named card in the first column, and it appears there.
 - **TEST-008-AC05** Step 5: the test opens the card, and `CardDetailModal` shows the card's title.
 - **TEST-008-AC06** Step 6: the test drags the card to the second column, and the card appears in the second column.
-- **TEST-008-AC07** Step 7: after the drag, the board data from the API shows the card in the second column with a positive float position.
+- **TEST-008-AC07** Step 7: after the drag, the board data from the API shows the card in the second column with a positive float `order`.
 - **TEST-008-AC08** Step 8: after a page reload, the card is still shown in the second column.
 
 ### TEST-009 Playwright responsive tests
@@ -1429,6 +1482,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COLUMN-001 | COLUMN-001-AC02 | POST /api/boards/{id}/columns |
 | COLUMN-001 | COLUMN-001-AC03 | POST /api/boards/{id}/columns |
 | COLUMN-001 | COLUMN-001-AC04 | POST /api/boards/{id}/columns |
+| COLUMN-001 | COLUMN-001-AC05 | POST /api/boards/{id}/columns (board row lock) |
 | COLUMN-002 | COLUMN-002-AC01 | PATCH /api/columns/{id} |
 | COLUMN-002 | COLUMN-002-AC02 | PATCH /api/columns/{id} |
 | COLUMN-002 | COLUMN-002-AC03 | PATCH /api/columns/{id} |
@@ -1457,18 +1511,41 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COLUMN-003 | COLUMN-003-AC12 | Flask URL map (route registration) |
 | COLUMN-003 | COLUMN-003-AC13 | DELETE /api/columns/{id} (administrator check) |
 | COLUMN-003 | COLUMN-003-AC14 | DELETE /api/columns/{id} (administrator check per board) |
+| COLUMN-003 | COLUMN-003-AC15 | DELETE /api/columns/{id} (board row lock) |
 | COLUMN-004 | COLUMN-004-AC01 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC02 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC03 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC04 | PATCH /api/boards/{id}/columns/reorder |
 | COLUMN-004 | COLUMN-004-AC05 | Column model (SQLAlchemy) |
 | COLUMN-004 | COLUMN-004-AC06 | PATCH /api/boards/{id}/columns/reorder (soft-delete guard) |
+| COLUMN-004 | COLUMN-004-AC07 | PATCH /api/boards/{id}/columns/reorder (Marshmallow schema) |
+| COLUMN-004 | COLUMN-004-AC08 | PATCH /api/boards/{id}/columns/reorder (Marshmallow schema) |
+| COLUMN-004 | COLUMN-004-AC09 | PATCH /api/boards/{id}/columns/reorder (Marshmallow schema) |
+| COLUMN-004 | COLUMN-004-AC10 | PATCH /api/boards/{id}/columns/reorder (service layer) |
+| COLUMN-004 | COLUMN-004-AC11 | PATCH /api/boards/{id}/columns/reorder (service layer) |
+| COLUMN-004 | COLUMN-004-AC12 | PATCH /api/boards/{id}/columns/reorder (final-state validation) |
+| COLUMN-004 | COLUMN-004-AC13 | PATCH /api/boards/{id}/columns/reorder (final-state validation) |
+| COLUMN-004 | COLUMN-004-AC14 | PATCH /api/boards/{id}/columns/reorder (transaction boundary) |
+| COLUMN-004 | COLUMN-004-AC15 | PATCH /api/boards/{id}/columns/reorder (board row lock) |
+| COLUMN-004 | COLUMN-004-AC16 | PATCH /api/boards/{id}/columns/reorder (board row lock) |
+| COLUMN-004 | COLUMN-004-AC17 | PATCH /api/boards/{id}/columns/reorder, POST /api/boards/{id}/columns, and DELETE /api/columns/{id} (board row lock) |
+| COLUMN-004 | COLUMN-004-AC18 | PATCH /api/boards/{id}/columns/reorder (response schema) |
+| COLUMN-004 | COLUMN-004-AC19 | PATCH /api/boards/{id}/columns/reorder (response schema) |
+| COLUMN-004 | COLUMN-004-AC20 | PATCH /api/boards/{id}/columns/reorder (no-op) |
+| COLUMN-004 | COLUMN-004-AC21 | PATCH /api/boards/{id}/columns/reorder (service layer) |
+| COLUMN-004 | COLUMN-004-AC22 | PATCH /api/boards/{id}/columns/reorder (service layer) |
+| COLUMN-004 | COLUMN-004-AC23 | PATCH /api/boards/{id}/columns/reorder (authorization) |
+| COLUMN-004 | COLUMN-004-AC24 | PATCH /api/boards/{id}/columns/reorder (authorization order) |
+| COLUMN-004 | COLUMN-004-AC25 | PATCH /api/boards/{id}/columns/reorder (position-to-order mapping) |
+| COLUMN-004 | COLUMN-004-AC26 | PATCH /api/boards/{id}/columns/reorder (service layer) |
+| COLUMN-004 | COLUMN-004-AC27 | PATCH /api/boards/{id}/columns/reorder (final-state validation) |
 | COLUMN-005 | COLUMN-005-AC01 | Column model (SQLAlchemy) |
 | COLUMN-005 | COLUMN-005-AC02 | POST /api/boards/{id}/columns |
 | COLUMN-005 | COLUMN-005-AC03 | Flask-Migrate migration scripts |
 | COLUMN-005 | COLUMN-005-AC04 | Column model (SQLAlchemy) |
 | COLUMN-005 | COLUMN-005-AC05 | Flask-Migrate migration scripts |
 | COLUMN-005 | COLUMN-005-AC06 | GET /api/boards/{id} and POST /api/boards/{id}/columns (soft-delete filtering) |
+| COLUMN-005 | COLUMN-005-AC07 | Column schema (position-to-order mapping) |
 | CARD-001 | CARD-001-AC01 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC02 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC03 | Card model (SQLAlchemy) |
@@ -1479,6 +1556,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-001 | CARD-001-AC08 | Card model (SQLAlchemy) |
 | CARD-001 | CARD-001-AC09 | Card model and Flask-Migrate migration scripts |
 | CARD-001 | CARD-001-AC10 | Card and column service layer (soft-delete invariant) |
+| CARD-001 | CARD-001-AC11 | Card schema (position-to-order mapping) |
 | CARD-002 | CARD-002-AC01 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC02 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC03 | POST /api/columns/{id}/cards |
@@ -1835,6 +1913,12 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-019 | FRONT-019-AC05 | useDragAndDrop |
 | FRONT-019 | FRONT-019-AC06 | useDragAndDrop |
 | FRONT-019 | FRONT-019-AC07 | useDragAndDrop |
+| FRONT-019 | FRONT-019-AC08 | useDragAndDrop (column reorder) |
+| FRONT-019 | FRONT-019-AC09 | useDragAndDrop (column reorder) |
+| FRONT-019 | FRONT-019-AC10 | useDragAndDrop (column reorder) |
+| FRONT-019 | FRONT-019-AC11 | useDragAndDrop (column normalization) |
+| FRONT-019 | FRONT-019-AC12 | useDragAndDrop (column normalization) |
+| FRONT-019 | FRONT-019-AC13 | useDragAndDrop (column normalization) |
 | FRONT-020 | FRONT-020-AC01 | useErrorHandler |
 | FRONT-020 | FRONT-020-AC02 | useErrorHandler |
 | FRONT-020 | FRONT-020-AC03 | useErrorHandler |
@@ -1914,6 +1998,14 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-004 | TEST-004-AC10 | Backend pytest suite (member activity analytics) |
 | TEST-004 | TEST-004-AC11 | Backend pytest suite (analytics response contract) |
 | TEST-004 | TEST-004-AC12 | Backend pytest suite (analytics end-to-end data set) |
+| TEST-004 | TEST-004-AC13 | Backend pytest suite (column reorder) |
+| TEST-004 | TEST-004-AC14 | Backend pytest suite (column reorder validation) |
+| TEST-004 | TEST-004-AC15 | Backend pytest suite (column reorder collisions) |
+| TEST-004 | TEST-004-AC16 | Backend pytest suite (column reorder transaction and lock) |
+| TEST-004 | TEST-004-AC17 | Backend pytest suite (column reorder concurrency) |
+| TEST-004 | TEST-004-AC18 | Backend pytest suite (column reorder no-op and timestamps) |
+| TEST-004 | TEST-004-AC19 | Backend pytest suite (public order mapping) |
+| TEST-004 | TEST-004-AC20 | Backend pytest suite (column reorder authorization and side effects) |
 | TEST-005 | TEST-005-AC01 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC02 | Frontend test suite (React Testing Library) |
 | TEST-005 | TEST-005-AC03 | Frontend test suite (card search) |
@@ -2025,7 +2117,7 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 ### UD-06 Float rebalancing
 - **Proposal:** When the gap between two neighboring positions falls below a small threshold, renumber the siblings in that column in a single transaction.
 - **Rationale:** Repeated midpoint inserts exhaust float precision. Renumbering restores gaps without changing visible order.
-- **Affects:** CARD-005, COLUMN-004, FRONT-019.
+- **Affects:** CARD-005, FRONT-019. Column normalization is handled through the approved reorder endpoint (UD-20) and needs no server-side column rebalancing, so this decision covers cards only.
 
 ### UD-07 Additional card fields
 - **Proposal:** Add an optional `description` text field and an optional `due_date`. Completion tracking is covered separately by UD-12.
@@ -2051,11 +2143,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Proposal:** A GitHub Actions workflow runs pytest and the frontend tests on each pull request. Playwright runs after deployment.
 - **Rationale:** Runs the fast tests before merge and the deployed-URL tests only once a deployment exists.
 - **Affects:** TEST-001, TEST-005, TEST-006.
-
-### UD-20 Column reorder request and response shape
-- **Proposal:** The request body carries a list of column IDs, each with its new positive float `order`. The response returns the board's columns in the new order.
-- **Rationale:** The assignment gives the route and the FLOAT strategy but not the payload. A list allows several columns to change in one call.
-- **Affects:** COLUMN-004, FRONT-019.
 
 ### UD-21 Password policy
 - **Proposal:** Minimum length of 8 characters, with no other composition rules.
@@ -2183,9 +2270,22 @@ These decisions were approved by the human reviewer. They are requirements, not 
   - **Success bodies.** A successful POST that creates a resource returns the created resource. A successful PATCH returns the complete updated public resource. A successful DELETE returns HTTP 200 with `{ "data": { "id": "<uuid>" } }` and never HTTP 204, for boards, columns, cards, and comments, and a repeated delete still returns the 404 that the existing criteria require. A GET that lists resources returns an array, and `[]` when empty, except where a specialized contract is approved or still pending. No success body exposes a password, a password hash, or internal-only data, and the only token ever returned is the login `access_token`.
   - **Login.** `POST /api/auth/login` returns HTTP 200 with `{ "data": { "access_token": "<jwt>" } }`. It adds no refresh token and no authentication endpoint, the Next.js server consumes it, and the raw JWT is never exposed to the browser. The Next.js server may derive the session expiry from the JWT `exp` claim, and the session interface may expose a non-sensitive `expires_at` value.
   - **Health.** `GET /api/health` returns HTTP 200 with `{ "data": { "status": "ok" } }` and performs no database check.
-  - **Deferred.** The reorder response (UD-20), the position rebalance and any addition to the position response (UD-06), the notification pagination shape (UD-09), the token lifetime (UD-01), the refresh policy (UD-02), the password-length policy (UD-21), and the naming of position versus order are not decided here.
+  - **Deferred.** The position rebalance and any addition to the position response (UD-06), the notification pagination shape (UD-09), the token lifetime (UD-01), the refresh policy (UD-02), the password-length policy (UD-21), are not decided here. The reorder response and the naming of position versus order were decided afterward in UD-20.
 - **Rationale:** One envelope, one status per kind of outcome, and one delete shape let the API client, the tests, and the Next.js proxy treat every endpoint the same way. Returning the resource ID on delete keeps the `{ "data": ... }` envelope valid without HTTP 204 and gives the client the ID to remove from its state.
 - **Governs:** Section 2.3, API-001, API-002, API-003, API-005, AUTH-002, BOARD-005, COLUMN-003, CARD-004, COMMENT-004, TEST-001.
+
+### UD-20 Column reorder contract and position/order naming [Approved]
+- **Decision:**
+  - **Endpoint.** `PATCH /api/boards/{id}/columns/reorder` reorders columns using positive FLOAT `order` values. No new endpoint is introduced. Any authenticated board member may reorder columns, and the five administrator-only operations of UD-05 are unchanged.
+  - **Request.** A JSON object with exactly the key `columns`, a non-empty array whose entries have exactly `id` (a valid UUID) and `order` (a positive, finite JSON number). Partial lists are allowed and may update one or more columns. Each column ID appears at most once, and duplicate `order` values within a request are invalid. Booleans, strings, null, `NaN`, `Infinity`, zero, and negative values are rejected, and unknown fields are rejected (A-06). No maximum `order` is imposed, and values that cannot be stored as finite positive floats are rejected with HTTP 400. A nonexistent, foreign-board, or soft-deleted column ID returns the same generic HTTP 400 body.
+  - **Validation and writes.** The service takes a row lock on the board, re-reads the active columns, applies the submitted values in memory, keeps the stored values of unlisted columns, and validates that all final `order` values are positive, finite, and pairwise distinct. A collision with an unlisted active column returns HTTP 409 and duplicates inside the request return HTTP 400. Nothing changes on a failure. Accepted changes are written atomically in one transaction. Unlisted columns are never renumbered silently. Column creation and deletion take the same board lock.
+  - **Concurrency.** Concurrent requests are serialized by the board lock, and the later one validates against the state that the earlier one committed, so a collision returns 409 and a valid request may succeed. Stale clients are not always detected, and no version field, ETag, or endpoint is added.
+  - **Response.** HTTP 200 with `data` as an array of all active columns of the board in ascending `order`, each with at least `id`, `name`, `order`, and `is_done`, and no soft-deleted column. It contains no `rebalanced` flag and keeps the UD-19 envelope. The reorder response exemption of UD-19 is removed, and the notification pagination exemption of UD-09 stays.
+  - **No-op and timestamps.** A request whose values all equal the stored values returns HTTP 200 with the complete array and writes nothing. `updated_at` changes only for columns whose `order` changed. A reorder creates no activity event or notification.
+  - **Normalization.** A normal drag sends only the moved column with a value between its neighbors. When no distinct midpoint exists, the frontend may send every active column it loaded, once each, through the same endpoint, with no flag and no minimum-gap threshold. The payload cannot distinguish this from a partial request that lists every column, so the server detects only deleted or soft-deleted listed columns (HTTP 400) and collisions with unlisted columns (HTTP 409). A column added by another user in the meantime is not detected, and the frontend refetches the board after any 400 or 409. UD-06 stays open for card positions.
+  - **Naming.** The database column and the SQLAlchemy model attribute are `position`, and the API JSON field is `order` in every request and response. The path `/api/cards/{id}/position` is unchanged, and the API schema maps `position` to `order`. "Ascending position" may still describe the internal ordering concept but never a public JSON field.
+- **Rationale:** Explicit float values keep the approved FLOAT strategy, allow a single-column write for a normal drag, and let concurrent independent moves merge. Validating the final state under a board lock keeps the active `order` values distinct, which a database unique index cannot do for swaps. One field name in the API avoids two names for the same value, and the model attribute avoids the SQL reserved word `order`.
+- **Governs:** Section 2.3, API-001, COLUMN-001, COLUMN-003, COLUMN-004, COLUMN-005, CARD-001, CARD-002, CARD-005, BOARD-003, FRONT-006, FRONT-019, ANALYTICS-001, ANALYTICS-002, TEST-004, TEST-008, A-01, A-04, A-05.
 
 ### UD-23 Cards in a deleted column [Approved]
 - **Decision:**
@@ -2250,21 +2350,21 @@ These decisions were approved by the human reviewer. They are requirements, not 
 |---|---|---|---|
 | AUTH | Authentication | 4 | 18 |
 | BOARD | Board management and membership | 7 | 48 |
-| COLUMN | Column management | 5 | 44 |
-| CARD | Card management and positioning | 7 | 62 |
+| COLUMN | Column management | 5 | 68 |
+| CARD | Card management and positioning | 7 | 63 |
 | COMMENT | Comments | 4 | 30 |
 | NOTIF | Notifications | 3 | 36 |
 | ANALYTICS | Board analytics | 6 | 53 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 182 |
+| FRONT | Frontend pages and components | 26 | 188 |
 | API | API client and response format | 7 | 37 |
-| TEST | Testing | 11 | 92 |
+| TEST | Testing | 11 | 100 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **93** | **646** |
+| **Total** | | **93** | **685** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 13 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-14, UD-18, UD-19, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
-- Unresolved design decisions (all [Proposed, not approved]): 11.
+- Approved decisions: 14 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-14, UD-18, UD-19, UD-20, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 10.
 - Acceptance criteria blocked by an unresolved decision: 0. Blocking decisions: none.
