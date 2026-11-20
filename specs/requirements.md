@@ -30,7 +30,7 @@ These inferences are embedded in acceptance criteria. They are not open question
 - **A-01** A new column or card is appended after the existing ones in its parent, with a positive float position greater than every non-deleted sibling.
 - **A-02** `GET /api/boards/{id}` returns the board with its columns and non-deleted cards, because the required endpoint set has no separate list endpoints for columns or cards.
 - **A-03** `DELETE /api/cards/{id}` is a soft delete that sets `deleted_at`. This is implied by the required `deleted_at` field on Card. The deletion scope for the other entities (boards, columns, comments) is approved in UD-18 and UD-23.
-- **A-04** Field names in request bodies: board `name`, column `name`, card `title`, comment `content`, user `name`, `email`, and `password`. Card position requests use `column_id` and `order`.
+- **A-04** Field names in request bodies: board `name`, column `name`, card `title`, comment `content`, user `name`, `email`, and `password`. Card position requests use `column_id` and `order`. The card assignment field is `assignee_id`: a UUID string to assign or `null` to unassign, accepted only by `PATCH /api/cards/{id}` and never by card creation (approved, UD-08).
 - **A-05** Comments are listed by `created_at` ascending. Notifications are listed newest first.
 - **A-06** A request body containing a field that the endpoint does not accept is rejected with HTTP 400. This includes `password` on `PATCH /api/users/me`.
 - **A-07** The JWT is held only in an HttpOnly cookie managed by the Next.js server layer (approved, UD-03). Browser JavaScript never reads or sends the JWT. The Next.js server forwards it to Flask as `Authorization: Bearer <token>`, which is the Flask-JWT-Extended default.
@@ -97,7 +97,10 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 201 | Successful creation of a user, board, column, or card | Proposed, not approved (UD-19) |
 | 400 | Any other request validation failure | Proposed, not approved (UD-19) |
 | 401 | Login with invalid credentials | Proposed, not approved (UD-19) |
-| 404 | Resource does not exist, or a notification belongs to another user | Proposed, not approved (UD-19) |
+| 404 | A notification belongs to another user, with the same status and body as a notification that does not exist | Approved (UD-08) |
+| 400 | `assignee_id` names a user who does not exist or is not a member of the card's board, with an identical body for both cases | Approved (UD-08) |
+| 400 | `assignee_id` is sent when creating a card | Approved (UD-08) |
+| 404 | Resource does not exist | Proposed, not approved (UD-19) |
 | 409 | Registration or profile update with an email already in use | Proposed, not approved (UD-19) |
 | 500 | Unhandled server error | Proposed, not approved (UD-19) |
 
@@ -214,7 +217,7 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-002-AC03** A user with no boards receives HTTP 200 and an empty list in `data`.
 
 ### BOARD-003 Get board
-`GET /api/boards/{id}` MUST return the board with its columns and cards to its members.
+`GET /api/boards/{id}` MUST return the board with its columns, its cards, and its members to its members. The member list is part of this response and populates the card assignee selector. No separate member-list endpoint exists (approved, UD-08 and UD-24).
 
 **Acceptance criteria**
 - **BOARD-003-AC01** A member receives HTTP 200 with the board, its columns ordered by ascending position, and each column's cards ordered by ascending position.
@@ -224,6 +227,11 @@ Every endpoint other than register, login, and health MUST require a valid JWT.
 - **BOARD-003-AC05** Each column in the response includes a boolean `is_done`.
 - **BOARD-003-AC06** The response includes the requesting user's role on the board, which is `administrator` for a Board Administrator and `member` for a Board Member (A-14).
 - **BOARD-003-AC07** Columns with a non-null `deleted_at` are absent from the response, and so are all cards that belong to them (approved, UD-18).
+- **BOARD-003-AC08** The response contains `members`, a list with one entry for each member of the board, including the requesting user, ordered by `name` ascending and then by `id`.
+- **BOARD-003-AC09** Each entry in `members` has exactly the keys `id` (a UUID string) and `name`, and no email address, password or password hash, role, or other profile field.
+- **BOARD-003-AC10** The `members` list of a board never contains a user who belongs only to another board, and a user who is not a member of the board receives HTTP 404 and no member data.
+- **BOARD-003-AC11** Adding `members` removes no previously required field: the response still contains the board `id` and `name`, the columns with `is_done`, the cards with `assignee_id`, and the requesting user's `role` (BOARD-003-AC05, AC06).
+- **BOARD-003-AC12** After `POST /api/boards/{id}/members` adds a user, the user appears in the board's `members` list in a following `GET /api/boards/{id}`.
 
 ### BOARD-004 Update board
 `PATCH /api/boards/{id}` MUST update a board's name. Only a Board Administrator of the board may rename it (approved, UD-05).
@@ -318,7 +326,7 @@ Membership and administrator status MUST be evaluated per board. The same check 
 - **COLUMN-003-AC08** After deletion, `GET /api/boards/{id}` lists neither the column nor any of its cards, and `GET /api/cards?assignee=me` lists none of its cards.
 - **COLUMN-003-AC09** Sending `DELETE /api/columns/{id}` for an already soft-deleted column returns HTTP 404 to an administrator and to a member, and no `deleted_at` value changes.
 - **COLUMN-003-AC10** After deletion, `PATCH /api/columns/{id}` (including `is_done`), `POST /api/columns/{id}/cards`, and any card operation on its cards return HTTP 404, and nothing changes.
-- **COLUMN-003-AC11** After deletion, the `completed_at` and assignee values of the column's cards are unchanged (approved, A-15), and no activity event is created or removed.
+- **COLUMN-003-AC11** After deletion, the `completed_at` and assignee values of the column's cards are unchanged (approved, A-15), and no activity event or notification is created or removed (approved, UD-08).
 - **COLUMN-003-AC12** The URL map contains no route that restores or undeletes a column or a card.
 - **COLUMN-003-AC13** A Board Member who is not an administrator of the column's board receives HTTP 403 (approved, UD-05). The column row, every card of the column, and all their `deleted_at` values, `updated_at` values, and `column_id` values are unchanged, and no activity event is created.
 - **COLUMN-003-AC14** A user who is an administrator of another board and only a member of the column's board receives HTTP 403, and nothing changes.
@@ -373,18 +381,25 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **CARD-002-AC05** A column ID that does not exist returns HTTP 404.
 - **CARD-002-AC06** A card created in a done column has `completed_at` equal to its creation time (A-13).
 - **CARD-002-AC07** The ID of a soft-deleted column returns HTTP 404 and no card is created (approved, UD-18).
+- **CARD-002-AC08** A request body that contains `assignee_id`, with any value including `null`, returns HTTP 400, no card is created, and no notification is created. Card creation is title-only (approved, UD-08).
+- **CARD-002-AC09** A successfully created card has `assignee_id` equal to null in the response `data`, and its creation creates no notification (approved, UD-08).
 
 ### CARD-003 Update card
-`PATCH /api/cards/{id}` MUST update card details, including the assignee. Additional card fields are unresolved (UD-07).
+`PATCH /api/cards/{id}` MUST update card details, including the assignee. It is the only way to assign or unassign an existing card (approved, UD-08). The body field `assignee_id` is a UUID string to assign a board member or `null` to unassign, and omitting `assignee_id` leaves the current assignment unchanged. A `assignee_id` that equals the stored value is an unchanged assignment: it creates no notification, no activity event, and does not change `updated_at` by itself. Additional card fields are unresolved (UD-07).
 
 **Acceptance criteria**
 - **CARD-003-AC01** A member sending a non-empty `title` receives HTTP 200, `data` contains the new title, and `updated_at` increases.
 - **CARD-003-AC02** An empty `title` returns HTTP 400 and the stored title is unchanged.
-- **CARD-003-AC03** Assigning the card to a member of the card's board returns HTTP 200 and the card appears in that member's `GET /api/cards?assignee=me` response (A-09).
-- **CARD-003-AC04** Assigning the card to a user who is not a member of the card's board returns HTTP 400 and the assignee is unchanged.
+- **CARD-003-AC03** Sending `assignee_id` equal to the ID of a member of the card's board returns HTTP 200, `data` contains that `assignee_id`, and the card appears in that member's `GET /api/cards?assignee=me` response (A-09). Any board member may assign any board member.
+- **CARD-003-AC04** Sending an `assignee_id` for a user who is not a member of the card's board, or for a user ID that does not exist, returns HTTP 400 with an identical response body for both cases, and the assignee is unchanged (approved, UD-08).
 - **CARD-003-AC05** A request body containing `id`, `created_at`, or `deleted_at` returns HTTP 400 and no field changes.
 - **CARD-003-AC06** A non-member of the card's board receives HTTP 404.
 - **CARD-003-AC07** A request for a soft-deleted card returns HTTP 404 and the card is unchanged (approved, UD-18).
+- **CARD-003-AC08** Sending `assignee_id: null` on an assigned card returns HTTP 200, `data` contains `assignee_id` equal to null, and the card is absent from the former assignee's `GET /api/cards?assignee=me` response (approved, UD-08).
+- **CARD-003-AC09** A request that omits `assignee_id` leaves the card's assignee unchanged, including when other fields change.
+- **CARD-003-AC10** Sending an `assignee_id` equal to the card's current value (including `null` on an unassigned card) returns HTTP 200, creates no notification, creates no activity event, and leaves `updated_at` unchanged when it is the only field sent. When it is sent together with another changed field, `updated_at` changes only because of that field.
+- **CARD-003-AC11** An `assignee_id` that is neither a valid UUID string nor `null` returns HTTP 400 and the card is unchanged.
+- **CARD-003-AC12** Every card in a response from `PATCH /api/cards/{id}`, `GET /api/boards/{id}`, and `POST /api/columns/{id}/cards` includes `assignee_id` as a UUID string or null.
 
 ### CARD-004 Delete card
 `DELETE /api/cards/{id}` MUST remove a card from all views by setting `deleted_at` to the UTC time of the request (approved, UD-18). The card row, its `column_id`, its `completed_at`, its comments, and its activity events are kept. No endpoint restores a soft-deleted card.
@@ -397,7 +412,8 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **CARD-004-AC05** After deletion, the card's `deleted_at` is a UTC timestamp equal to the time of the request, and its `column_id`, `completed_at`, and `assignee` values are unchanged.
 - **CARD-004-AC06** Sending `DELETE /api/cards/{id}` for an already soft-deleted card returns HTTP 404 and its `deleted_at` is unchanged.
 - **CARD-004-AC07** After deletion, the card's comments still exist in the database, and `PATCH /api/cards/{id}`, `PATCH /api/cards/{id}/position`, and the card's comment endpoints return HTTP 404 (approved, A-15).
-- **CARD-004-AC08** A successful `DELETE /api/cards/{id}` records no activity event and removes none.
+- **CARD-004-AC08** A successful `DELETE /api/cards/{id}` records no activity event and removes none, and it creates no notification and removes none (approved, UD-08).
+- **CARD-004-AC09** After deletion, every notification that refers to the card remains in its recipient's `GET /api/notifications` and can still be marked as read (approved, UD-08).
 
 ### CARD-005 Move card (position update)
 `PATCH /api/cards/{id}/position` MUST move a card to a column and position. Positions MUST be positive float values.
@@ -448,6 +464,8 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **COMMENT-001-AC04** A request with no token returns HTTP 401.
 - **COMMENT-001-AC05** A non-member of the card's board receives HTTP 404 and no comment is created.
 - **COMMENT-001-AC06** A request for a soft-deleted card returns HTTP 404, no comment is created, and no activity event is recorded (approved, A-15).
+- **COMMENT-001-AC07** When the card has an assignee other than the comment's author, creating the comment also creates one unread `comment_added` notification for that assignee in the same transaction. No notification is created when the author is the assignee or the card is unassigned (approved, UD-08, NOTIF-003-AC09 and AC10).
+- **COMMENT-001-AC08** The notification created by a comment contains no comment text (approved, UD-08, NOTIF-003-AC16).
 
 ### COMMENT-002 List comments
 `GET /api/cards/{id}/comments` MUST return a card's comments to the board's members.
@@ -497,9 +515,13 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **NOTIF-001-AC03** Given 5 notifications, `per_page=2&page=4` returns HTTP 200 and an empty list.
 - **NOTIF-001-AC04** A `page` or `per_page` value that is 0, negative, or not an integer returns HTTP 400.
 - **NOTIF-001-AC05** A request with no token returns HTTP 401.
+- **NOTIF-001-AC06** Each item has exactly these keys: `id` (UUID string), `type`, `message` (string), `board_id` (UUID string), `card_id` (UUID string), `actor` (an object with `id`, a UUID string, and `name`), `is_read` (boolean), and `created_at` (a UTC ISO 8601 timestamp). `type` is `card_assigned` or `comment_added` (approved, UD-08).
+- **NOTIF-001-AC07** Items are ordered by `created_at` descending, and items with equal `created_at` are ordered by `id` descending, so the order is the same on every request (approved, UD-08).
+- **NOTIF-001-AC08** No item contains comment text, an email address, or a password hash, and `message` is built only from the actor's name and the card title (approved, UD-08).
+- **NOTIF-001-AC09** A notification stays in the response after its card or column is soft-deleted and after its comment is deleted, and the response needs no live card to be built (approved, UD-08).
 
 ### NOTIF-002 Mark notification as read
-`PATCH /api/notifications/{id}/read` MUST mark a notification as read for its recipient.
+`PATCH /api/notifications/{id}/read` MUST mark a notification as read for its recipient. A notification belongs to exactly one recipient and only that recipient may read or mark it (approved, UD-08).
 
 **Acceptance criteria**
 - **NOTIF-002-AC01** The recipient receives HTTP 200, and the notification is read in a following `GET /api/notifications`.
@@ -507,13 +529,35 @@ The Card model MUST define a UUID primary key, `created_at`, `updated_at`, a nul
 - **NOTIF-002-AC03** A user who is not the recipient receives HTTP 404 and the notification is unchanged.
 - **NOTIF-002-AC04** A notification ID that does not exist returns HTTP 404.
 - **NOTIF-002-AC05** A request with no token returns HTTP 401.
+- **NOTIF-002-AC06** The recipient receives HTTP 200 when marking a notification whose card or column was soft-deleted or whose comment was deleted, and the notification is read afterward (approved, UD-08).
+- **NOTIF-002-AC07** A user who is not the recipient receives the same HTTP 404 status and body as for a notification ID that does not exist, including when both users belong to the same board (approved, UD-08).
+- **NOTIF-002-AC08** Marking a notification as read changes only its read state: its `type`, `message`, `board_id`, `card_id`, `actor`, and `created_at` are unchanged.
 
 ### NOTIF-003 Notification creation
-The system MUST create notifications for the events approved in UD-08.
+The system MUST create a notification only for these events (approved, UD-08): a card is assigned to a board member other than the requester (`card_assigned`), a card is reassigned to a different board member other than the requester (`card_assigned`), and a comment is created on an assigned card by someone other than its assignee (`comment_added`). The recipient is the new assignee in the first two cases and the card's assignee in the third. A user is never notified about their own actions. The notification is created in the same database transaction as the originating action, only for a recipient who is a member of the card's board, and never contains comment text.
+
+The events that do not notify are: card creation, card unassignment, assigning a card to yourself, repeating an unchanged `assignee_id`, card moves and reordering, card title changes, card deletion, column creation, renaming, reordering, completion changes, and deletion, board changes and membership additions, and comment edits and deletions.
 
 **Acceptance criteria**
-- **NOTIF-003-AC01** **Blocked by UD-08.** Each approved event creates exactly one unread notification per approved recipient.
-- **NOTIF-003-AC02** **Blocked by UD-08.** A user who is not a member of the relevant board never receives a notification for events on that board.
+- **NOTIF-003-AC01** When a board member assigns an unassigned card to a different board member through `PATCH /api/cards/{id}`, exactly one unread `card_assigned` notification is created for the new assignee, with the requester as `actor`, and the notification is visible in the new assignee's `GET /api/notifications` (approved, UD-08).
+- **NOTIF-003-AC02** A user who is not a member of the relevant board never receives a notification for events on that board: assigning a card to a non-member returns HTTP 400 and creates no notification, a comment notifies only the card's assignee, and a non-member's `GET /api/notifications` contains no notification for that board (approved, UD-08).
+- **NOTIF-003-AC03** When a card assigned to B is reassigned to C by someone other than C, exactly one `card_assigned` notification is created for C and none for B. B's earlier notifications remain unchanged.
+- **NOTIF-003-AC04** When a user assigns a card to themselves, the assignee changes and no notification is created for anyone.
+- **NOTIF-003-AC05** When a card is unassigned with `assignee_id: null`, no notification is created, and the former assignee's earlier notifications remain unchanged.
+- **NOTIF-003-AC06** When a card is assigned to B, unassigned, and then assigned to B again by someone other than B, B receives a second `card_assigned` notification. A card reassigned from B to C and back to B by someone other than B also notifies B again. No uniqueness rule prevents these repeated notifications.
+- **NOTIF-003-AC07** When `assignee_id` equals the stored assignee, no notification is created. Sending the same assignment twice in a row creates exactly one notification in total.
+- **NOTIF-003-AC08** When two identical assignment requests for the same card and assignee run concurrently, exactly one notification is created and the assignee changes once. The service serializes them with a database row lock and a comparison with the stored state.
+- **NOTIF-003-AC09** When a board member other than the assignee creates a comment on an assigned card, exactly one unread `comment_added` notification is created for the assignee, with the comment author as `actor`.
+- **NOTIF-003-AC10** No notification is created when the comment author is the card's assignee, or when the card has no assignee.
+- **NOTIF-003-AC11** None of these actions creates a notification: card creation, card move, card reorder, card title change, card deletion, column creation, renaming, reordering, completion change, or deletion, board rename, board deletion, member addition, and comment edit or deletion.
+- **NOTIF-003-AC12** If a failure is forced after the card's assignee was updated and before the notification is stored, or after the notification is stored and before the commit, the assignee is unchanged and no notification exists afterward.
+- **NOTIF-003-AC13** If a failure is forced after the comment is stored and before the notification is stored, or after the notification is stored and before the commit, no comment and no notification exist afterward.
+- **NOTIF-003-AC14** A request rejected with HTTP 400, 401, 403, 404, or 409 creates no notification, including a mixed request that changes `assignee_id` and also contains an invalid field.
+- **NOTIF-003-AC15** The recipient of a notification is a member of the notification's board at the time of creation, and the service refuses to create a notification for a user who is not.
+- **NOTIF-003-AC16** The `message` of a `comment_added` notification does not contain the comment text, and no notification field or message contains an email address.
+- **NOTIF-003-AC17** After the card is soft-deleted, after its column is soft-deleted, or after the comment is deleted, the notification remains in the recipient's `GET /api/notifications` and can be marked as read.
+- **NOTIF-003-AC18** After `DELETE /api/boards/{id}`, no notification that refers to that board or its cards remains, for any recipient, and notifications of other boards are unchanged (BOARD-005-AC04).
+- **NOTIF-003-AC19** Creating a notification creates no activity event, and no activity-event count changes (approved, UD-13).
 
 ### 3.7 Board analytics (ANALYTICS)
 
@@ -731,6 +775,8 @@ The `/boards/[id]` page MUST be a Server Component that fetches and displays a b
 - **FRONT-006-AC08** The board data is fetched on the Next.js server with the JWT forwarded from the session cookie, and the JWT string does not appear in the page HTML.
 - **FRONT-006-AC09** For a Board Administrator, the column-delete confirmation states that the column's cards will be deleted with it. After a successful `DELETE /api/columns/{id}`, the column and all its cards disappear from the page without a reload.
 - **FRONT-006-AC10** When `DELETE /api/columns/{id}` fails, the column and its cards stay visible and an error toast shows the `error` message.
+- **FRONT-006-AC11** The board page passes the `members` from the `GET /api/boards/{id}` response to `CardDetailModal` and sends no other request to obtain them (approved, UD-08).
+- **FRONT-006-AC12** When the page is opened from a notification for a card that is not in the board data, it shows the message "This card is no longer available" and a way back to the board, shows no error toast, and does not fail to render.
 
 ### FRONT-007 Board analytics view
 `/boards/[id]` MUST display the analytics returned by `GET /api/boards/{id}/analytics` (A-10).
@@ -773,13 +819,22 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 ### 4.3 Components
 
 ### FRONT-011 CardDetailModal
-`CardDetailModal` MUST show and edit one card, and MUST include the card's comments.
+`CardDetailModal` MUST show and edit one card, and MUST include the card's comments. It MUST also let any board member assign or unassign the card through an assignee dropdown that lists the board's members, using `assignee_id` and `PATCH /api/cards/{id}` (approved, UD-08). It receives the board's members from the board data, which `GET /api/boards/{id}` returns, and sends no additional request to obtain them. Card creation stays title-only, so `AddCardForm` has no assignment control.
 
 **Acceptance criteria**
 - **FRONT-011-AC01** The modal shows the card's title and assignee, and contains `CommentList`.
 - **FRONT-011-AC02** Saving an edited title calls `PATCH /api/cards/{id}` and the board shows the new title.
 - **FRONT-011-AC03** Deleting the card after confirmation calls `DELETE /api/cards/{id}`, closes the modal, and removes the card from the board.
 - **FRONT-011-AC04** The modal is built on `BaseModal` and closes with the close control and the Escape key.
+- **FRONT-011-AC05** The modal displays the current assignee's name, found by matching `assignee_id` to the board's `members`, or the text "Unassigned" when `assignee_id` is null.
+- **FRONT-011-AC06** The assignee dropdown has an accessible name that includes "Assignee", contains one option per board member showing only the member's `name`, contains an "Unassigned" option, and has the current assignee selected. The dropdown is present for Board Administrators and Board Members alike and shows no email addresses.
+- **FRONT-011-AC07** Choosing a member sends `PATCH /api/cards/{id}` through the same-origin proxy with a body whose only field is `assignee_id` set to that member's UUID. Choosing "Unassigned" sends a body whose only field is `assignee_id` set to null. Choosing the current value sends no request.
+- **FRONT-011-AC08** After a successful request, the modal and the card on the board show the new assignee, or "Unassigned", without a page reload.
+- **FRONT-011-AC09** When the request fails with a non-2xx status or a network error, the dropdown and the displayed assignee return to the previous assignee, and an error toast is shown (approved, UD-08).
+- **FRONT-011-AC10** While the request is pending, the dropdown is disabled, and a second change sends no second request.
+- **FRONT-011-AC11** The dropdown can be focused with the Tab key, its options can be changed with the arrow keys, and a selection can be committed with the keyboard alone. The focused control has a visible focus indicator.
+- **FRONT-011-AC12** At a 360 px wide viewport, the modal and the assignee dropdown fit the viewport with no horizontal scrolling, and the dropdown is at least 44 px high.
+- **FRONT-011-AC13** The modal contains no control that creates a card, and `AddCardForm` contains no assignee control, because card creation is title-only (approved, UD-08).
 
 ### FRONT-012 CommentList
 `CommentList` MUST display a card's comments and let the user add, edit, and delete their own comments.
@@ -817,13 +872,23 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-015-AC04** On open, keyboard focus moves into the dialog. On close, focus returns to the element that opened it.
 
 ### FRONT-016 NotificationBell
-`NotificationBell` MUST display the unread notification count.
+`NotificationBell` MUST display the unread notification count, and it MUST let the recipient read, open, and mark as read the notifications returned by `GET /api/notifications` (approved, UD-08). It is a Client Component and uses `useNotifications` for fetching and polling. How the unread count is derived across pages is defined by UD-09, which is unresolved; the criteria below use fewer notifications than one page.
 
 **Acceptance criteria**
 - **FRONT-016-AC01** When the unread count from `useNotifications` is greater than 0, the bell shows that number. When it is 0, no number is shown.
 - **FRONT-016-AC02** The bell's accessible name includes the unread count.
-- **FRONT-016-AC03** Activating a notification calls `PATCH /api/notifications/{id}/read` and reduces the displayed count by 1.
+- **FRONT-016-AC03** Activating an unread notification calls `PATCH /api/notifications/{id}/read` and reduces the displayed count by 1. Activating an already-read notification sends no request and leaves the count unchanged.
 - **FRONT-016-AC04** The bell is present on every protected page and absent from `/login` and `/register`.
+- **FRONT-016-AC05** Opening the bell shows a list of the notifications returned by `GET /api/notifications` in the order returned. Each item shows its `message`, a readable label for its `type` ("Assignment" for `card_assigned` and "Comment" for `comment_added`), and its timestamp. The timestamp is rendered in a `time` element whose `datetime` attribute is the UTC value of `created_at`.
+- **FRONT-016-AC06** Read and unread items are distinguished by more than color: an unread item has a visible "Unread" text label and an accessible name that includes "Unread", and a read item has neither.
+- **FRONT-016-AC07** Each unread item has a "Mark as read" control that calls `PATCH /api/notifications/{id}/read`, turns the item into a read item, and reduces the displayed count by 1, without navigating.
+- **FRONT-016-AC08** Activating an item navigates to `/boards/{board_id}` of the notification and opens the notification's card in `CardDetailModal` when the card is present in the board data. The item is also marked as read.
+- **FRONT-016-AC09** When the notification's card is no longer available because it was soft-deleted, activating the item still marks it as read and opens the board page, which shows the friendly message "This card is no longer available" (FRONT-006-AC12) and no error toast.
+- **FRONT-016-AC10** An item displays only its `message`, type label, and timestamp. No item shows comment text, an email address, or any other field.
+- **FRONT-016-AC11** When loading notifications or marking one as read fails, the bell shows the generic message "Notifications could not be updated" and no HTTP status, URL, stack trace, or server message, and it keeps the previously displayed notifications and count.
+- **FRONT-016-AC12** With fake timers, an authenticated bell shows a new unread notification and the increased count after the poll at 30,000 ms, and the count and list stop updating after the user logs out.
+- **FRONT-016-AC13** The bell button, the item list, each item, and each "Mark as read" control can be reached and activated with the keyboard (Tab, Enter, and Space), and the Escape key closes the list and returns focus to the bell button.
+- **FRONT-016-AC14** At a 360 px wide viewport, the open list fits the viewport with no horizontal scrolling, and each activatable control is at least 44 px high.
 
 ### FRONT-024 BoardCard.tsx
 `BoardCard.tsx` MUST be the dashboard tile that represents one board. It is a Server Component with no interactive behavior.
@@ -870,6 +935,7 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-026-AC06** The file begins with a `"use client"` directive.
 - **FRONT-026-AC07** Styling uses Tailwind utility classes. The submit control is a `BaseButton`, and the file contains no raw `<button>` element.
 - **FRONT-026-AC08** The title input has a label that provides its accessible name.
+- **FRONT-026-AC09** The form has no assignee control, and the request body it sends contains only `title` (approved, UD-08).
 
 ### 4.4 State, hooks, and utilities
 
@@ -881,7 +947,8 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-017-AC02** After the component unmounts, no further requests are made.
 - **FRONT-017-AC03** The hook makes no request while the user is unauthenticated.
 - **FRONT-017-AC04** The hook returns the unread count and a function that calls `PATCH /api/notifications/{id}/read`.
-- **FRONT-017-AC05** When a poll fails, the error is passed to `useErrorHandler` and the next poll still occurs 30 seconds later.
+- **FRONT-017-AC05** When a poll fails, the failure is reported through `useErrorHandler` with the generic message "Notifications could not be updated" instead of the server's `error` text (FRONT-016-AC11), and the next poll still occurs 30 seconds later.
+- **FRONT-017-AC06** Repeated poll failures show at most one error indication until a poll succeeds, so a failing API does not stack an error toast every 30 seconds. The indication contains no HTTP status, URL, or stack trace (approved, UD-08).
 
 ### FRONT-018 AuthContext
 `AuthContext` MUST hold the authentication state for Client Components. It MUST expose `currentUser`, a `session` value, `login()`, `logout()`, and `updateProfile()`. With the approved HttpOnly cookie architecture (UD-03), `session` is a secure representation that contains no JWT: it holds only an authenticated flag and the session expiry time. Its initial `currentUser` comes from the server (Section 4.1, root layout).
@@ -1025,6 +1092,7 @@ The backend suite MUST test authentication and board-scoped authorization.
 - **TEST-003-AC12** A parametrized test over the actor roles administrator and member asserts that a non-owner receives HTTP 403 when editing or deleting another user's comment, and that an owner receives HTTP 200, with the comment unchanged after each 403.
 - **TEST-003-AC13** A parametrized test asserts that a rejected mutation (HTTP 400, 403, 404, or 409) on each mutating endpoint leaves a before-and-after snapshot of all rows, including `updated_at`, unchanged and creates no activity event or notification.
 - **TEST-003-AC14** Tests assert the check order in Section 2.4: no token with an invalid body returns 401, a non-member with an administrator-only request returns 404, a member with an administrator-only request and an invalid body returns 403, an administrator with an invalid body returns 400, a duplicate member returns 409, and an unparseable JSON body returns 400 for any caller.
+- **TEST-003-AC15** Tests assert the member-list privacy rules in BOARD-003-AC08 to AC11: a member sees the complete `members` list, each entry has exactly `id` and `name`, no email or hash appears anywhere in the response, a user of another board is never listed, a non-member receives the uniform 404 without member data, the previously required fields are still present, and the URL map has no separate member-list route.
 
 ### TEST-004 Position and analytics tests
 The backend suite MUST test FLOAT positioning and analytics.
@@ -1050,6 +1118,8 @@ The frontend MUST have React Testing Library tests for its components and hooks.
 - **TEST-005-AC06** Tests cover the session layer and the proxy route handlers in FRONT-023-AC01 to AC08, AC11, AC13, and AC14, using a mocked Flask API.
 - **TEST-005-AC07** Tests cover `AuthContext.updateProfile()` in FRONT-018-AC06 to AC08.
 - **TEST-005-AC08** Tests cover the Done/Active toggle and the delete control in FRONT-025-AC09 to AC17: visibility by role, the request body, the success state, rollback on failure, the analytics refresh, and a 403 response.
+- **TEST-005-AC09** Tests cover the assignee dropdown in FRONT-011-AC05 to AC13: the displayed assignee, the member options and the "Unassigned" option, the request body for an assignment and an unassignment, the success state, restoring the previous assignee with an error toast on failure, the pending state, keyboard operation, and the absence of assignment controls in `AddCardForm`.
+- **TEST-005-AC10** Tests cover `NotificationBell` in FRONT-016-AC05 to AC14 and `useNotifications` in FRONT-017-AC06: the item content, the read and unread distinction, marking as read, navigation to the board, the "This card is no longer available" state, the absence of comment text, a generic error message, polling with fake timers, and keyboard operation.
 
 ### TEST-006 Playwright suite rules
 Playwright end-to-end tests MUST run against the deployed Vercel frontend.
@@ -1111,6 +1181,20 @@ The backend pytest suite MUST cover soft deletion of columns and cards, preserva
 - **TEST-010-AC12** A test asserts that a Board Member's `DELETE /api/columns/{id}` on an already soft-deleted column returns HTTP 404 and not 403, and that no `deleted_at` value changes (COLUMN-003-AC09, Section 2.4).
 - **TEST-010-AC13** A test with a user who is an administrator of another board and a member of the column's board asserts HTTP 403 and no change (COLUMN-003-AC14).
 - **TEST-010-AC14** A test sends `DELETE /api/boards/{id}` as a Board Member who is not an administrator and asserts HTTP 403 and that the board and every dependent row, including soft-deleted columns and cards, are unchanged (BOARD-005-AC03).
+
+### TEST-011 Notification tests
+The backend pytest suite MUST cover notification creation, the events that do not notify, duplicate prevention, transactional behavior, recipient-only access, retention, and removal with the board (approved, UD-08). These tests run against PostgreSQL.
+
+**Acceptance criteria**
+- **TEST-011-AC01** A parametrized test asserts the event matrix of NOTIF-003-AC01 to AC11: initial assignment, reassignment to the new assignee only, self-assignment, unassignment, assignment after unassignment, an unchanged `assignee_id`, a comment by a non-assignee, a comment by the assignee, a comment on an unassigned card, and every non-event listed in NOTIF-003-AC11. Each case asserts the exact notifications created, including their `type`, recipient, and `actor`.
+- **TEST-011-AC02** A test sends two identical assignment requests concurrently on separate database connections and asserts exactly one notification and one assignee change (NOTIF-003-AC08).
+- **TEST-011-AC03** Tests force a failure at each step of an assignment and of a comment creation, before and after the notification is stored, and assert that neither the originating change nor a notification exists afterward (NOTIF-003-AC12, AC13). They also assert that a rejected request (400, 401, 403, 404, 409) creates no notification (NOTIF-003-AC14).
+- **TEST-011-AC04** Tests assert recipient-only access: user B never sees user A's notifications in `GET /api/notifications`, and B's `PATCH /api/notifications/{id}/read` for A's notification returns the same 404 as for an unknown ID and leaves it unread, including when A and B share a board (NOTIF-001-AC01, NOTIF-002-AC03, NOTIF-002-AC07).
+- **TEST-011-AC05** Tests assert that notifications remain listed and can be marked as read after the card is soft-deleted, after its column is soft-deleted, and after the comment is deleted (NOTIF-003-AC17, NOTIF-002-AC06, CARD-004-AC09).
+- **TEST-011-AC06** A test deletes a board that has notifications for several recipients and asserts that none remain for that board or its cards and that notifications of another board are unchanged (NOTIF-003-AC18).
+- **TEST-011-AC07** Tests assert the item contract of NOTIF-001-AC06 to AC08, including key names and types, the descending order with equal `created_at` values ordered by `id` descending, and that no message contains comment text or an email address.
+- **TEST-011-AC08** A test assigns B, unassigns, assigns B again, and then reassigns to C and back to B, and asserts that B has the expected number of notifications. A schema introspection asserts that the notification table has no unique constraint that would prevent these repeats (NOTIF-003-AC06).
+- **TEST-011-AC09** A test asserts that creating notifications creates no activity event and that a notification is created only for a recipient who is a member of the board (NOTIF-003-AC15, AC19).
 
 ## 6. Non-Functional Requirements
 
@@ -1241,6 +1325,11 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | BOARD-003 | BOARD-003-AC05 | GET /api/boards/{id} |
 | BOARD-003 | BOARD-003-AC06 | GET /api/boards/{id} |
 | BOARD-003 | BOARD-003-AC07 | GET /api/boards/{id} |
+| BOARD-003 | BOARD-003-AC08 | GET /api/boards/{id} |
+| BOARD-003 | BOARD-003-AC09 | GET /api/boards/{id} (member schema) |
+| BOARD-003 | BOARD-003-AC10 | GET /api/boards/{id} |
+| BOARD-003 | BOARD-003-AC11 | GET /api/boards/{id} |
+| BOARD-003 | BOARD-003-AC12 | GET /api/boards/{id} and POST /api/boards/{id}/members |
 | BOARD-004 | BOARD-004-AC01 | PATCH /api/boards/{id} |
 | BOARD-004 | BOARD-004-AC02 | PATCH /api/boards/{id} |
 | BOARD-004 | BOARD-004-AC03 | PATCH /api/boards/{id} |
@@ -1331,6 +1420,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-002 | CARD-002-AC05 | POST /api/columns/{id}/cards |
 | CARD-002 | CARD-002-AC06 | POST /api/columns/{id}/cards (service layer) |
 | CARD-002 | CARD-002-AC07 | POST /api/columns/{id}/cards (soft-delete guard) |
+| CARD-002 | CARD-002-AC08 | POST /api/columns/{id}/cards (Marshmallow schema) |
+| CARD-002 | CARD-002-AC09 | POST /api/columns/{id}/cards |
 | CARD-003 | CARD-003-AC01 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC02 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC03 | PATCH /api/cards/{id} |
@@ -1338,6 +1429,11 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-003 | CARD-003-AC05 | PATCH /api/cards/{id} (Marshmallow schema) |
 | CARD-003 | CARD-003-AC06 | PATCH /api/cards/{id} |
 | CARD-003 | CARD-003-AC07 | PATCH /api/cards/{id} (soft-delete guard) |
+| CARD-003 | CARD-003-AC08 | PATCH /api/cards/{id} (service layer) |
+| CARD-003 | CARD-003-AC09 | PATCH /api/cards/{id} (service layer) |
+| CARD-003 | CARD-003-AC10 | PATCH /api/cards/{id} (service layer) |
+| CARD-003 | CARD-003-AC11 | PATCH /api/cards/{id} (Marshmallow schema) |
+| CARD-003 | CARD-003-AC12 | PATCH /api/cards/{id}, GET /api/boards/{id}, and POST /api/columns/{id}/cards (card schema) |
 | CARD-004 | CARD-004-AC01 | DELETE /api/cards/{id} |
 | CARD-004 | CARD-004-AC02 | DELETE /api/cards/{id} |
 | CARD-004 | CARD-004-AC03 | GET /api/cards?assignee=me |
@@ -1346,6 +1442,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | CARD-004 | CARD-004-AC06 | DELETE /api/cards/{id} (soft-delete guard) |
 | CARD-004 | CARD-004-AC07 | DELETE /api/cards/{id} and card and comment routes (soft-delete guard) |
 | CARD-004 | CARD-004-AC08 | DELETE /api/cards/{id} (service layer) |
+| CARD-004 | CARD-004-AC09 | DELETE /api/cards/{id} (notification retention) |
 | CARD-005 | CARD-005-AC01 | PATCH /api/cards/{id}/position |
 | CARD-005 | CARD-005-AC02 | PATCH /api/cards/{id}/position |
 | CARD-005 | CARD-005-AC03 | PATCH /api/cards/{id}/position |
@@ -1374,6 +1471,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | COMMENT-001 | COMMENT-001-AC04 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC05 | POST /api/cards/{id}/comments |
 | COMMENT-001 | COMMENT-001-AC06 | POST /api/cards/{id}/comments (soft-delete guard) |
+| COMMENT-001 | COMMENT-001-AC07 | POST /api/cards/{id}/comments (notification creation) |
+| COMMENT-001 | COMMENT-001-AC08 | POST /api/cards/{id}/comments (notification creation) |
 | COMMENT-002 | COMMENT-002-AC01 | GET /api/cards/{id}/comments |
 | COMMENT-002 | COMMENT-002-AC02 | GET /api/cards/{id}/comments |
 | COMMENT-002 | COMMENT-002-AC03 | GET /api/cards/{id}/comments |
@@ -1401,13 +1500,37 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | NOTIF-001 | NOTIF-001-AC03 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC04 | GET /api/notifications |
 | NOTIF-001 | NOTIF-001-AC05 | GET /api/notifications |
+| NOTIF-001 | NOTIF-001-AC06 | GET /api/notifications (notification schema) |
+| NOTIF-001 | NOTIF-001-AC07 | GET /api/notifications |
+| NOTIF-001 | NOTIF-001-AC08 | GET /api/notifications (notification schema) |
+| NOTIF-001 | NOTIF-001-AC09 | GET /api/notifications |
 | NOTIF-002 | NOTIF-002-AC01 | PATCH /api/notifications/{id}/read |
 | NOTIF-002 | NOTIF-002-AC02 | PATCH /api/notifications/{id}/read |
 | NOTIF-002 | NOTIF-002-AC03 | PATCH /api/notifications/{id}/read |
 | NOTIF-002 | NOTIF-002-AC04 | PATCH /api/notifications/{id}/read |
 | NOTIF-002 | NOTIF-002-AC05 | PATCH /api/notifications/{id}/read |
+| NOTIF-002 | NOTIF-002-AC06 | PATCH /api/notifications/{id}/read |
+| NOTIF-002 | NOTIF-002-AC07 | PATCH /api/notifications/{id}/read |
+| NOTIF-002 | NOTIF-002-AC08 | PATCH /api/notifications/{id}/read |
 | NOTIF-003 | NOTIF-003-AC01 | Notification service (service layer) |
 | NOTIF-003 | NOTIF-003-AC02 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC03 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC04 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC05 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC06 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC07 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC08 | Notification service (database locking and state comparison) |
+| NOTIF-003 | NOTIF-003-AC09 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC10 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC11 | Notification service (service layer) |
+| NOTIF-003 | NOTIF-003-AC12 | Notification service (transaction boundary) |
+| NOTIF-003 | NOTIF-003-AC13 | Notification service (transaction boundary) |
+| NOTIF-003 | NOTIF-003-AC14 | Notification service (transaction boundary) |
+| NOTIF-003 | NOTIF-003-AC15 | Notification service (recipient check) |
+| NOTIF-003 | NOTIF-003-AC16 | Notification service (message builder) |
+| NOTIF-003 | NOTIF-003-AC17 | Notification service (retention) |
+| NOTIF-003 | NOTIF-003-AC18 | DELETE /api/boards/{id} (service layer deletion strategy) |
+| NOTIF-003 | NOTIF-003-AC19 | Notification service (service layer) |
 | ANALYTICS-001 | ANALYTICS-001-AC01 | GET /api/boards/{id}/analytics |
 | ANALYTICS-001 | ANALYTICS-001-AC02 | GET /api/boards/{id}/analytics |
 | ANALYTICS-001 | ANALYTICS-001-AC03 | GET /api/boards/{id}/analytics |
@@ -1492,6 +1615,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-006 | FRONT-006-AC08 | Page /boards/[id] and apiClient.ts (server-side mode) |
 | FRONT-006 | FRONT-006-AC09 | Page /boards/[id] and ColumnHeader.tsx |
 | FRONT-006 | FRONT-006-AC10 | Page /boards/[id] and ColumnHeader.tsx |
+| FRONT-006 | FRONT-006-AC11 | Page /boards/[id] (board view container) |
+| FRONT-006 | FRONT-006-AC12 | Page /boards/[id] (board view container) |
 | FRONT-007 | FRONT-007-AC01 | Page /boards/[id] (analytics panel) |
 | FRONT-007 | FRONT-007-AC02 | Page /boards/[id] (analytics panel) |
 | FRONT-008 | FRONT-008-AC01 | Card search filter (Client Component on /boards/[id]) |
@@ -1514,6 +1639,15 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-011 | FRONT-011-AC02 | CardDetailModal |
 | FRONT-011 | FRONT-011-AC03 | CardDetailModal |
 | FRONT-011 | FRONT-011-AC04 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC05 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC06 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC07 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC08 | CardDetailModal and Page /boards/[id] (board view container) |
+| FRONT-011 | FRONT-011-AC09 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC10 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC11 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC12 | CardDetailModal |
+| FRONT-011 | FRONT-011-AC13 | CardDetailModal and AddCardForm.tsx |
 | FRONT-012 | FRONT-012-AC01 | CommentList |
 | FRONT-012 | FRONT-012-AC02 | CommentList |
 | FRONT-012 | FRONT-012-AC03 | CommentList |
@@ -1533,6 +1667,16 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-016 | FRONT-016-AC02 | NotificationBell |
 | FRONT-016 | FRONT-016-AC03 | NotificationBell |
 | FRONT-016 | FRONT-016-AC04 | Authenticated layout header |
+| FRONT-016 | FRONT-016-AC05 | NotificationBell |
+| FRONT-016 | FRONT-016-AC06 | NotificationBell |
+| FRONT-016 | FRONT-016-AC07 | NotificationBell |
+| FRONT-016 | FRONT-016-AC08 | NotificationBell and Page /boards/[id] |
+| FRONT-016 | FRONT-016-AC09 | NotificationBell and Page /boards/[id] |
+| FRONT-016 | FRONT-016-AC10 | NotificationBell |
+| FRONT-016 | FRONT-016-AC11 | NotificationBell |
+| FRONT-016 | FRONT-016-AC12 | NotificationBell and useNotifications |
+| FRONT-016 | FRONT-016-AC13 | NotificationBell |
+| FRONT-016 | FRONT-016-AC14 | NotificationBell |
 | FRONT-024 | FRONT-024-AC01 | BoardCard.tsx |
 | FRONT-024 | FRONT-024-AC02 | BoardCard.tsx |
 | FRONT-024 | FRONT-024-AC03 | BoardCard.tsx |
@@ -1564,11 +1708,13 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-026 | FRONT-026-AC06 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC07 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC08 | AddCardForm.tsx |
+| FRONT-026 | FRONT-026-AC09 | AddCardForm.tsx |
 | FRONT-017 | FRONT-017-AC01 | useNotifications |
 | FRONT-017 | FRONT-017-AC02 | useNotifications |
 | FRONT-017 | FRONT-017-AC03 | useNotifications |
 | FRONT-017 | FRONT-017-AC04 | useNotifications |
 | FRONT-017 | FRONT-017-AC05 | useNotifications |
+| FRONT-017 | FRONT-017-AC06 | useNotifications and useErrorHandler |
 | FRONT-018 | FRONT-018-AC01 | AuthContext |
 | FRONT-018 | FRONT-018-AC02 | AuthContext |
 | FRONT-018 | FRONT-018-AC03 | AuthContext (initialized from root layout) |
@@ -1648,6 +1794,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-003 | TEST-003-AC12 | Backend pytest suite (comment ownership) |
 | TEST-003 | TEST-003-AC13 | Backend pytest suite (atomicity) |
 | TEST-003 | TEST-003-AC14 | Backend pytest suite (authorization check order) |
+| TEST-003 | TEST-003-AC15 | Backend pytest suite (board-member list privacy) |
 | TEST-004 | TEST-004-AC01 | Backend pytest suite (card position) |
 | TEST-004 | TEST-004-AC02 | Backend pytest suite (card model) |
 | TEST-004 | TEST-004-AC03 | Backend pytest suite (analytics) |
@@ -1663,6 +1810,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-005 | TEST-005-AC06 | Frontend test suite (session layer and proxy route handlers) |
 | TEST-005 | TEST-005-AC07 | Frontend test suite (AuthContext) |
 | TEST-005 | TEST-005-AC08 | Frontend test suite (ColumnHeader and board view) |
+| TEST-005 | TEST-005-AC09 | Frontend test suite (CardDetailModal and AddCardForm) |
+| TEST-005 | TEST-005-AC10 | Frontend test suite (NotificationBell and useNotifications) |
 | TEST-006 | TEST-006-AC01 | Playwright configuration |
 | TEST-006 | TEST-006-AC02 | Playwright test suite |
 | TEST-006 | TEST-006-AC03 | Playwright test suite |
@@ -1699,6 +1848,15 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-010 | TEST-010-AC12 | Backend pytest suite (column deletion authorization) |
 | TEST-010 | TEST-010-AC13 | Backend pytest suite (column deletion authorization) |
 | TEST-010 | TEST-010-AC14 | Backend pytest suite (board deletion authorization) |
+| TEST-011 | TEST-011-AC01 | Backend pytest suite (notification event matrix) |
+| TEST-011 | TEST-011-AC02 | Backend pytest suite (notification concurrency) |
+| TEST-011 | TEST-011-AC03 | Backend pytest suite (notification transaction) |
+| TEST-011 | TEST-011-AC04 | Backend pytest suite (notification privacy) |
+| TEST-011 | TEST-011-AC05 | Backend pytest suite (notification retention) |
+| TEST-011 | TEST-011-AC06 | Backend pytest suite (notification board deletion) |
+| TEST-011 | TEST-011-AC07 | Backend pytest suite (notification contract) |
+| TEST-011 | TEST-011-AC08 | Backend pytest suite (notification repeat assignments) |
+| TEST-011 | TEST-011-AC09 | Backend pytest suite (notification recipient check) |
 | NFR-001 | NFR-001-AC01 | User model and password hashing (service layer) |
 | NFR-001 | NFR-001-AC02 | Flask logging configuration |
 | NFR-002 | NFR-002-AC01 | Repository (secret scan procedure in README) |
@@ -1760,11 +1918,6 @@ This section records design decisions. Section 8.1 lists unresolved decisions. E
 - **Proposal:** Add an optional `description` text field and an optional `due_date`. Completion tracking is covered separately by UD-12.
 - **Rationale:** These are common Trello-like fields, but only title and assignee are required today.
 - **Affects:** CARD-003, FRONT-011.
-
-### UD-08 Notification events and recipients
-- **Proposal:** Create a notification for the assignee when a card is assigned to them, and for the card's assignee when another user comments on that card.
-- **Rationale:** These are the two events that directly concern one user, which keeps the first version small.
-- **Affects:** NOTIF-003.
 
 ### UD-09 Pagination defaults and unread count
 - **Proposal:** Default `per_page` 20, maximum 100. The notification list response includes the user's total unread count alongside the page of items.
@@ -1848,6 +2001,19 @@ These decisions were approved by the human reviewer. They are requirements, not 
 - **Rationale:** Board-level and destructive column operations are the narrowest meaning of "management". Column and card work is routine for all members. The comment rule comes from the assignment. A fixed check order and a no-op for an unchanged `is_done` keep unauthorized users from learning anything about validation and keep repeated requests from rewriting completion times.
 - **Governs:** Sections 2.1 and 2.4, BOARD-004, BOARD-005, BOARD-006, BOARD-007, COLUMN-002, COLUMN-003, COMMENT-003, COMMENT-004, FRONT-006, FRONT-025, TEST-003, TEST-004, TEST-005, TEST-010.
 - **Note:** Column reorder (`PATCH /api/boards/{id}/columns/reorder`) is not in the administrator-only list, so every board member may use it.
+
+### UD-08 Notification events and recipients [Approved]
+- **Decision:**
+  - **Triggers.** A notification is created when a card is assigned to another board member (`card_assigned`), when a card is reassigned to a different board member (`card_assigned`, new assignee only), and when a comment is created on an assigned card by someone other than its assignee (`comment_added`, recipient is the assignee). Users are never notified about their own actions. A new assignment after an unassignment creates a new notification unless it is a self-assignment. A reassignment from B to C notifies C only.
+  - **Exclusions.** No notification for card creation, card unassignment, self-assignment, an unchanged `assignee_id`, card moves and reordering, card title changes, card deletion, column creation, renaming, reordering, completion changes, or deletion, board changes or membership additions, or comment edits and deletions.
+  - **Assignment API.** Card creation is title-only and rejects `assignee_id` with HTTP 400. `PATCH /api/cards/{id}` is the only way to assign or unassign an existing card: `assignee_id` is a UUID string to assign or `null` to unassign, and omitting it leaves the assignment unchanged. A nonexistent user and a user who is not a member of the card's board return the same HTTP 400 body. An unchanged `assignee_id` creates no notification and no activity event and does not change `updated_at` by itself.
+  - **Persistence and security.** A notification belongs to exactly one recipient and is accessible only to that recipient, and another user receives 404 when reading or marking it. It is created in the same transaction as the originating assignment or comment, only for a valid board-member recipient, and never contains comment text. It remains available (readable and markable) after its card or comment is deleted, and is removed only when its board is hard-deleted. Notifications for earlier assignments are kept after unassignment or reassignment. Failed or rejected operations create none. Concurrent identical assignment requests are serialized with database locking and a comparison with the stored state, and no uniqueness constraint blocks legitimate repeated assignments.
+  - **Response contract.** Each item has `id`, `type`, `message`, `board_id`, `card_id`, `actor` (`id` and `name`), `is_read`, and `created_at`, with UUID identifiers and UTC ISO 8601 timestamps, ordered newest first with `id` descending as the tie-breaker. The existing envelope and pagination parameters are unchanged. Messages contain no comment text and no private user data.
+  - **Board members for assignment.** `GET /api/boards/{id}` also returns `members` as a list of `{ id, name }` for the board's members only. It exposes no email address or other profile field, keeps every previously required field (including the requester's role), and is the only source of the member list: no additional member-list endpoint is allowed.
+  - **Frontend.** `CardDetailModal` has an assignee dropdown with the board's members and an "Unassigned" option, updates the visible card after success, and restores the previous assignee with an error after failure. `AddCardForm` has no assignment control. `NotificationBell` shows the unread count, polls every 30 seconds while authenticated, shows each notification's message, type, and timestamp, distinguishes read from unread, lets the recipient mark notifications as read, navigates to the card when it is available, shows "This card is no longer available" when it is not, never shows comment text, and handles API errors without exposing sensitive details.
+- **Rationale:** These are the events that directly concern one user, which keeps notifications relevant and the first version small. Persisting notifications independently of cards keeps the recipient's history and unread count stable. The locking rule prevents duplicate notifications without blocking valid repeated assignments.
+- **Governs:** A-04, BOARD-003, CARD-002, CARD-003, CARD-004, COMMENT-001, COLUMN-003, NOTIF-001, NOTIF-002, NOTIF-003, FRONT-006, FRONT-011, FRONT-016, FRONT-017, FRONT-026, TEST-003, TEST-005, TEST-011, Section 2.3.
+- **Still open:** The default and maximum `per_page` and the way the unread count is derived across pages (UD-09). The URL mechanism that opens a specific card from a notification link is left to `design.md`.
 
 ### UD-10 Search fields and scope [Approved]
 - **Decision:** Card search filters card titles within the current board, in the browser, using the board data already loaded from `GET /api/boards/{id}`.
@@ -1957,22 +2123,22 @@ These decisions were approved by the human reviewer. They are requirements, not 
 | Category | Name | Requirements | Acceptance criteria |
 |---|---|---|---|
 | AUTH | Authentication | 4 | 17 |
-| BOARD | Board management and membership | 7 | 43 |
+| BOARD | Board management and membership | 7 | 48 |
 | COLUMN | Column management | 5 | 44 |
-| CARD | Card management and positioning | 7 | 54 |
-| COMMENT | Comments | 4 | 28 |
-| NOTIF | Notifications | 3 | 12 |
+| CARD | Card management and positioning | 7 | 62 |
+| COMMENT | Comments | 4 | 30 |
+| NOTIF | Notifications | 3 | 36 |
 | ANALYTICS | Board analytics | 6 | 31 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 153 |
+| FRONT | Frontend pages and components | 26 | 176 |
 | API | API client and response format | 7 | 26 |
-| TEST | Testing | 10 | 72 |
+| TEST | Testing | 11 | 84 |
 | NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **92** | **524** |
+| **Total** | | **93** | **598** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
 - Next.js pages covered: 6 of 6.
-- Approved decisions: 10 (UD-03, UD-04, UD-05, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
-- Unresolved design decisions (all [Proposed, not approved]): 14.
-- Acceptance criteria blocked by an unresolved decision: 9. Blocking decisions: UD-08: 2; UD-14: 7.
+- Approved decisions: 11 (UD-03, UD-04, UD-05, UD-08, UD-10, UD-11, UD-12, UD-13, UD-18, UD-23, UD-24) plus 5 approved assumptions (A-11, A-12, A-13, A-14, A-15).
+- Unresolved design decisions (all [Proposed, not approved]): 13.
+- Acceptance criteria blocked by an unresolved decision: 7. Blocking decisions: UD-14: 7.
