@@ -79,13 +79,13 @@ board_id = db.Column(UUID(as_uuid=True), db.ForeignKey("boards.id", ondelete="CA
 comment_id = db.Column(UUID(as_uuid=True), nullable=True)   # no cascade from a comment: a comment delete must keep the event
 ```
 ### DB-10 Notification belongs to a user and a board
-**Rule:** `Notification` carries the recipient user id and a board id, and is removed when its board is deleted. There is no unique constraint that blocks repeated notifications of the same type for the same card and user (UD-08). The pagination shape, default page size, and unread count are undecided (UD-09), so models and indexes MUST NOT assume them. Check: a test inserts two identical-looking notifications and both persist, and a board delete removes the notifications.
+**Rule:** `Notification` carries the recipient user id and a board id, and is removed when its board is deleted. There is no unique constraint that blocks repeated notifications of the same type for the same card and user (UD-08). The read state is a Boolean `is_read`, `nullable=False`, default false, because the API item exposes `is_read` as a boolean (NOTIF-001-AC06). Do not store the read state as a `read_at` timestamp or add a read-time column. The pagination shape, default page size, and unread count are undecided (UD-09), so models and indexes MUST NOT assume them. Check: a test inserts two identical-looking notifications and both persist, a new notification has `is_read` false, marking it read changes only `is_read`, and a board delete removes the notifications.
 **Rationale:** Re-assignment after unassignment is a valid new event.
 **Concrete Example:**
 ```python
 user_id = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"), nullable=False)
 board_id = db.Column(UUID(as_uuid=True), db.ForeignKey("boards.id", ondelete="CASCADE"), nullable=False)
-read_at = db.Column(db.DateTime(timezone=True), nullable=True)
+is_read = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
 ```
 ---
 ## 4. Indexes and queries

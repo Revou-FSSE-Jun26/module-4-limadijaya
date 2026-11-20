@@ -33,41 +33,47 @@ for bp in (auth_bp, users_bp, boards_bp, columns_bp, cards_bp, comments_bp, noti
     app.register_blueprint(bp, url_prefix="/api")
 ```
 ### BE-03 Routes, services, models, and schemas have separate jobs
-**Rule:** `routes.py` only parses the request, loads and validates input through a schema, calls one service function, and returns the envelope. `service.py` holds business rules, authorization checks, transactions, and locking. `schema.py` holds Marshmallow schemas only. Models hold columns and relationships, not business rules. A route MUST NOT call `db.session.commit()` or build a query. A service MUST NOT import `flask.request`. Check: grep of `routes.py` for `session.` and `query`, and grep of `service.py` for `request`.
-**Rationale:** Services that do not depend on the request object can be tested directly and reused by the transaction and concurrency tests.
+**Rule:** `routes.py` only parses the request (reads the path ids and the raw JSON body, where invalid JSON returns 400 and a wrong content type returns 415), calls one service function with the raw payload, and returns the envelope. `service.py` holds business rules, transactions, and locking, and it runs the checks in the Section 2.4 order: it loads the resource and the membership (404), checks the permission (403), and only then calls the Marshmallow schema `load()` (400) and the conflict checks (409). A route MUST NOT call a schema `load()` for a board-scoped or resource-scoped endpoint before the service has passed the 404 and 403 checks, because a non-member or a member without permission must get 404 or 403 whatever the body contains. Routes that have no resource to authorize (`POST /api/auth/register`, `POST /api/auth/login`, `POST /api/boards`, `PATCH /api/users/me`) may validate in the service as their first step after authentication. `schema.py` holds Marshmallow schemas only. Models hold columns and relationships, not business rules. A route MUST NOT call `db.session.commit()` or build a query. A service MUST NOT import `flask.request`. Check: grep of `routes.py` for `session.`, `query`, and `.load(`; grep of `service.py` for `request`; and, for each resource-scoped endpoint, a test that sends an invalid body as a non-member and expects 404, and as a member without permission (where one exists) and expects 403.
+**Rationale:** Services that do not depend on the request object can be tested directly and reused by the transaction and concurrency tests. Validating after authorization keeps the approved order 401, 404, 403, then 400 or 409 (UD-05, Section 2.4, BOARD-006-AC06).
 **Concrete Example:**
 ```python
 @cards_bp.patch("/cards/<uuid:card_id>/position")
 @jwt_required()
 def move_card(card_id):
-    payload = MoveCardSchema().load(request.get_json())
-    card, rebalanced = card_service.move_card(current_user_id(), card_id, payload)
+    raw = request.get_json()                      # invalid JSON -> 400, wrong content type -> 415
+    card, rebalanced = card_service.move_card(current_user_id(), card_id, raw)
     return ok({**CardSchema().dump(card), "rebalanced": rebalanced})
+
+# service.py
+def move_card(user_id, card_id, raw):
+    card, board_id = get_live_card_or_404(card_id)    # 404: missing, soft-deleted, or parent soft-deleted
+    require_member(user_id, board_id)                 # 404 for a non-member, same body
+    payload = MoveCardSchema().load(raw)              # 400 only after the checks above
+    ...
 ```
 ---
 ## 2. Requests, responses, and errors
 ### BE-04 One response envelope
-**Rule:** Every JSON response uses `{"data": ...}` on success and `{"error": {...}}` on failure through shared helpers (`ok`, `fail`). `DELETE` returns `{"data": {"id": "<id>"}}`. Login returns `{"data": {"access_token": "..."}}` and nothing else. Health returns `{"data": {"status": "ok"}}`. No route returns a bare object, list, or string. Check: the contract tests (TEST-001-AC04, AC05) assert the envelope for every endpoint including error paths.
+**Rule:** Every JSON response uses `{"data": ...}` on success and `{"error": "<non-empty string>"}` on failure through shared helpers (`ok`, `fail`). The `error` value is one non-empty string, never an object, and an error body has no `data` key (UD-19, API-002-AC04). Do not add `code`, `message`, or `details` keys. `DELETE` returns `{"data": {"id": "<id>"}}`. Login returns `{"data": {"access_token": "..."}}` and nothing else. Health returns `{"data": {"status": "ok"}}`. No route returns a bare object, list, or string. Check: the contract tests (TEST-001-AC04, AC05) assert the envelope for every endpoint including error paths.
 **Rationale:** The frontend `apiClient.ts` depends on one shape (API-002).
 **Concrete Example:**
 ```python
 def ok(data, status=200):
     return jsonify({"data": data}), status
 
-def fail(code, message, status, details=None):
-    body = {"code": code, "message": message}
-    if details: body["details"] = details
-    return jsonify({"error": body}), status
+def fail(message, status):
+    assert isinstance(message, str) and message      # the error value is a non-empty string
+    return jsonify({"error": message}), status
 ```
 ### BE-05 Central error handlers
-**Rule:** Register handlers so the envelope also covers framework errors: Marshmallow `ValidationError` (400), 401 from JWT callbacks, 404, 405, 415, and unhandled exceptions (500). The 500 body is a fixed generic message. It MUST NOT include a stack trace, SQL text, a token, or an exception string. The full exception is logged server side without the token or the request body. Invalid JSON returns 400. A missing JSON content type on a body route returns 415. Check: tests that force an exception and assert the body contains none of the exception text (API-002-AC05).
+**Rule:** Register handlers so the envelope also covers framework errors: Marshmallow `ValidationError` (400, converted to one non-empty string), 401 from JWT callbacks, 404, 405, 415, and unhandled exceptions (500). The 500 body is a fixed generic message. It MUST NOT include a stack trace, SQL text, a token, or an exception string. The full exception is logged server side without the token or the request body. Invalid JSON returns 400. A missing JSON content type on a body route returns 415. Check: tests that force an exception and assert the body contains none of the exception text (API-002-AC05).
 **Rationale:** Leaked internals help attackers, and a client's error parser must work for every status.
 **Concrete Example:**
 ```python
 @app.errorhandler(Exception)
 def unhandled(exc):
     app.logger.exception("unhandled error")          # no token, no body
-    return fail("internal_error", "Something went wrong.", 500)
+    return fail("Internal server error.", 500)      # {"error": "Internal server error."}
 ```
 ### BE-06 Marshmallow validates every input strictly
 **Rule:** Every route that accepts a body, query string, or path value used as data has a Marshmallow schema defined with `unknown = RAISE`, so an unknown field returns 400 (A-06). Query strings on `GET /api/boards/{id}/analytics` are rejected with 400 when any parameter is present. Numeric fields (`order` and any position value) MUST be real JSON numbers: reject booleans, strings, `null`, `NaN`, `Infinity`, `1e400`, and `1e-400` (CARD-006-AC04, COLUMN-004-AC02). Parse JSON with a hook that rejects `NaN` and `Infinity` constants. Schemas never accept `id`, `created_at`, `deleted_at`, `completed_at`, `board_id`, or role fields from the client unless the requirement names them. Check: parametrized tests per schema for unknown field, wrong type, and each bad number.
@@ -149,17 +155,21 @@ class CardSchema(Schema):
 card.completed_at = now if dest_column.is_done else None
 ```
 ### BE-14 Activity events and notifications are written in the same transaction
-**Rule:** The service that changes state also appends the `ActivityEvent` and any `Notification` in the same transaction. If the change rolls back, the event and notification roll back. Notifications are created only for `card_assigned` and `comment_added`, never for the actor's own action. Assignment uses `assignee_id`: `null` unassigns, the assignee must be a member of the board, and card creation rejects `assignee_id`. A re-assignment to the same user creates no event and no notification (compare under the card row lock, NOTIF-003-AC08). Repeated valid assignments to different states may create repeated notifications (UD-08). Marking a notification read affects only the owner's notification, and another user's notification returns 404. Check: tests for rollback, no-op assignment, self-assignment, and non-member assignee.
-**Rationale:** Events and notifications that do not match committed data corrupt analytics and the bell count.
+**Rule:** The service that changes state also appends any `ActivityEvent` and any `Notification` in the same transaction. If the change rolls back, the event and notification roll back. Only three activity event types exist: `card_created` (a card is created), `card_moved` (a card moves to a different column, with source and destination columns), and `comment_created` (a comment is created). No other action appends an event: assignment, unassignment, comment edit or delete, card delete, column changes, `is_done` toggles, reordering, and rebalancing append none (ANALYTICS-004-AC09, ANALYTICS-006, A-13, A-14). Notifications are created only for `card_assigned` (a card is assigned or reassigned to a different board member who is not the requester) and `comment_added` (a comment on an assigned card by someone other than the assignee), never for the actor's own action, and creating one appends no activity event (NOTIF-003-AC19). Assignment uses `assignee_id`: `null` unassigns, the assignee must be a member of the board, and card creation rejects `assignee_id`. An assignment to the stored assignee creates no notification (compare under the card row lock, NOTIF-003-AC08). Repeated valid assignments to different states may create repeated notifications (UD-08). Marking a notification read affects only the owner's notification, and another user's notification returns 404. Check: tests for rollback, no-op assignment, self-assignment, non-member assignee, and a test that an assignment leaves the activity-event count unchanged.
+**Rationale:** Events and notifications that do not match committed data corrupt analytics and the bell count, and an event type outside the approved three would change the member activity counts.
 **Concrete Example:**
 ```python
 with db.session.begin_nested():
     card = lock_card(card_id)
     if card.assignee_id != new_assignee_id:
         card.assignee_id = new_assignee_id
-        db.session.add(ActivityEvent(board_id=card.board_id, card_id=card.id, actor_id=user_id, type="card_assigned", created_at=now))
+        # assignment appends NO ActivityEvent; only a notification, and only for another member
         if new_assignee_id and new_assignee_id != user_id:
-            db.session.add(Notification(user_id=new_assignee_id, board_id=card.board_id, type="card_assigned", card_id=card.id, created_at=now))
+            db.session.add(Notification(user_id=new_assignee_id, actor_id=user_id, board_id=card.board_id,
+                                        card_id=card.id, type="card_assigned", message=message, created_at=now))
+
+# card creation appends the event instead
+db.session.add(ActivityEvent(board_id=board_id, actor_id=user_id, card_id=card.id, type="card_created", created_at=now))
 ```
 ### BE-15 Analytics is one clock reading and a join
 **Rule:** `GET /api/boards/{id}/analytics` computes a current UTC Monday-to-Monday half-open window `[start, end)` from one clock reading. The response has exactly `window`, `cards_per_column`, `completed_this_week`, and `member_activity`. `cards_per_column` and member counts come from a single grouped query with JOINs, not a query per column or user. All queries exclude soft-deleted data. Any query parameter returns 400. The clock is injectable (`app.extensions` or a parameter) so tests can fix it. Check: tests at the boundary instants (Monday 00:00:00 UTC inclusive, next Monday exclusive) and a SQL-capture test that counts statements.
@@ -173,7 +183,7 @@ def week_window(now: datetime):
 ---
 ## 5. Transactions and concurrency
 ### BE-16 One request, one atomic transaction
-**Rule:** A service function that writes opens one transaction and commits once at the end. Any exception rolls the whole transaction back. No route commits, and no service commits halfway and then continues writing. Validation and authorization errors raise before any write. A failed multi-step operation (column delete with its cards, board hard-delete, move with rebalance, assignment with event and notification) MUST leave no partial state. Check: tests that inject a failure at the last step and assert nothing changed.
+**Rule:** A service function that writes opens one transaction and commits once at the end. Any exception rolls the whole transaction back. No route commits, and no service commits halfway and then continues writing. Validation and authorization errors raise before any write. A failed multi-step operation (column delete with its cards, board hard-delete, move with rebalance, assignment with its notification) MUST leave no partial state. Check: tests that inject a failure at the last step and assert nothing changed.
 **Rationale:** Partial writes cannot be repaired by the client (NFR-004).
 **Concrete Example:**
 ```python
@@ -203,7 +213,7 @@ if column is None or column.deleted_at is not None:
 ```python
 user = User.query.filter_by(email=email).one_or_none()
 if user is None or not verify_password(user.password_hash, password):
-    return fail("invalid_credentials", "Email or password is incorrect.", 401)
+    return fail("Invalid email or password.", 401)   # same string for both cases
 ```
 ### BE-19 CORS only for the health route
 **Rule:** Browsers do not call Flask directly, because the Next.js server proxies every call. The only cross-origin access is `GET /api/health` from the configured web origin, without credentials and without allowing the `Authorization` header (API-004). Any other route MUST NOT send CORS headers. The CORS library is a design.md decision. Check: tests that `OPTIONS` and `GET` on other routes carry no `Access-Control-*` header.
@@ -239,9 +249,11 @@ def test_non_member_gets_404_even_with_invalid_body(client, outsider_token, boar
 ## Reviewer checklist
 Not a guideline. A reviewer confirms:
 - The change touches only the eight Blueprints, and routes contain no queries or commits (BE-02, BE-03).
-- Every response uses the envelope, and 500 bodies are generic (BE-04, BE-05).
+- Every response uses the envelope, `error` is a plain non-empty string, and 500 bodies are generic (BE-04, BE-05).
+- Routes pass raw JSON to services, and schemas load only after the 404 and 403 checks (BE-03, BE-09).
 - Schemas use `unknown = RAISE`, and numbers are strict (BE-06).
 - Check order is 401, 404, 403, then 400/409 (BE-09), and only the five admin-only operations require administrator (BE-10).
 - Every column or card query filters `deleted_at IS NULL` (BE-11).
 - Writes are atomic, locks follow the order, and events and notifications share the transaction (BE-14, BE-16, BE-17).
+- Only `card_created`, `card_moved`, and `comment_created` events exist, and assignment appends none (BE-14).
 - New tests include permission, rollback, and concurrency cases (BE-20).
