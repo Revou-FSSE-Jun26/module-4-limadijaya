@@ -7,13 +7,19 @@ These guidelines apply to the Flask API (Flask, SQLAlchemy, Flask-Migrate, Flask
 ---
 ## 1. Structure and layering
 ### BE-01 Application factory, config from the environment
-**Rule:** The app is built by `create_app(config=None)`. Extensions (`db`, `migrate`, `jwt`) are created at module level without an app and bound with `init_app` inside the factory. All settings (database URL, JWT secret, allowed web origin for the health route) come from environment variables read in a config object. No secret or connection string appears in source, tests, or logs. Tests call `create_app` with a test config. Check: grep finds no literal secret or URL, and the test suite builds the app only through the factory.
+**Rule:** The app is built by `create_app(config=None)`. Extensions (`db`, `migrate`, `jwt`) are created at module level without an app and bound with `init_app` inside the factory. All settings come from environment variables read in a config object: `DATABASE_URL`, `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS` (required, with no default in code because UD-01 is open), `FRONTEND_ORIGIN` (the allowed web origin of the health route), `LOG_LEVEL`, and the optional `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` (the small connection pool of DA-16, with no hard-coded value). A missing required variable stops start-up with a message that names it (NFR-010-AC03). `MAX_CONTENT_LENGTH` is a constant of 1,048,576 bytes and not an environment variable (DA-07). The variable names agree with `design.md` Section 4.1 and `database.md` DB-01, and all of them are listed in `backend/.env.example`. No secret or connection string appears in source, tests, or logs. Tests call `create_app` with a test config. Check: grep finds no literal secret or URL, the test suite builds the app only through the factory, and a test unsets each required variable and asserts the message.
 **Rationale:** A factory lets tests run with isolated config, and environment-only secrets satisfy NFR-001 and the deployment rules.
 **Concrete Example:**
 ```python
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
+
+class Config:
+    SQLALCHEMY_DATABASE_URI = os.environ["DATABASE_URL"]           # fails fast when missing
+    SQLALCHEMY_ENGINE_OPTIONS = _engine_options()                  # pool_pre_ping, DB_POOL_SIZE, DB_MAX_OVERFLOW (database.md DB-01)
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=int(os.environ["JWT_ACCESS_TOKEN_EXPIRES_SECONDS"]))   # no default: UD-01 is open
+    MAX_CONTENT_LENGTH = 1_048_576                                 # DA-07
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -66,10 +72,14 @@ def fail(message, status):
     return jsonify({"error": message}), status
 ```
 ### BE-05 Central error handlers
-**Rule:** Register handlers so the envelope also covers framework errors: Marshmallow `ValidationError` (400, converted to one non-empty string), 401 from JWT callbacks, 404, 405, 415, and unhandled exceptions (500). The 500 body is a fixed generic message. It MUST NOT include a stack trace, SQL text, a token, or an exception string. The full exception is logged server side without the token or the request body. Invalid JSON returns 400. A missing JSON content type on a body route returns 415. Check: tests that force an exception and assert the body contains none of the exception text (API-002-AC05).
+**Rule:** Register handlers so the envelope also covers framework errors: Marshmallow `ValidationError` (400, converted to one non-empty string), 401 from JWT callbacks, 404, 405, 413, 415, and unhandled exceptions (500). A request body is limited to 1,048,576 bytes through Flask `MAX_CONTENT_LENGTH` (DA-07). A larger body returns 413 with `{"error": "Request body is too large."}`, and a body of exactly 1,048,576 bytes MUST NOT be rejected only because of its size. The size decision depends only on the body size and not on the resource or the caller's membership (Section 2.4, API-002-AC06). Do not add per-field length limits. The 500 body is a fixed generic message. It MUST NOT include a stack trace, SQL text, a token, or an exception string. The full exception is logged server side without the token or the request body. Invalid JSON returns 400. A missing JSON content type on a body route returns 415. Check: tests that force an exception and assert the body contains none of the exception text (API-002-AC05), and a test that sends a body of 1,048,576 bytes (not rejected for its size) and a body of 1,048,577 bytes (413 with the envelope, `Content-Type: application/json`, no `data` key, and no changed row) (TEST-001-AC06).
 **Rationale:** Leaked internals help attackers, and a client's error parser must work for every status.
 **Concrete Example:**
 ```python
+@app.errorhandler(RequestEntityTooLarge)
+def too_large(exc):
+    return fail("Request body is too large.", 413)      # {"error": "Request body is too large."}
+
 @app.errorhandler(Exception)
 def unhandled(exc):
     app.logger.exception("unhandled error")          # no token, no body
@@ -196,35 +206,48 @@ def delete_column(user_id, column_id):
         raise
 ```
 ### BE-17 Row locks and lock order
-**Rule:** Use `SELECT ... FOR UPDATE` (`with_for_update()`) in these cases: the board row for column reorder, create, and delete (UD-20); the destination column row for card move and card creation (UD-06); the card row, then a state comparison, for assignment (NOTIF-003-AC08). When a request needs several locks, take them in this order: board row, then column rows by ascending id, then card rows by ascending id. After taking a lock, re-read the row and re-check existence, `deleted_at`, and permissions before writing. Never lock in the reverse order. Never hold a lock across a network call. Check: SQL-capture tests that assert `FOR UPDATE` and its order, and concurrency tests on separate connections (two simultaneous moves into one column, reorder against column delete, two simultaneous assignments).
-**Rationale:** A fixed order prevents deadlocks, and the re-read prevents acting on stale state. The order itself is a guideline-level rule, and the requirements only mandate the locks listed above.
+**Rule:** Use `SELECT ... FOR UPDATE` (`with_for_update()`) and, where stated, `FOR SHARE` (`with_for_update(read=True)`) for exactly these approved locks (DA-11): the board row for column reorder, column create, column delete, and board delete (UD-20); the column row for a change of `is_done` and, after the board row, for column delete; the destination column row for card move and card creation (UD-06); the card row, then a state comparison, for card update including assignment (NOTIF-003-AC08), for card move, and for card delete; and the card row `FOR SHARE` for comment creation. When a request needs several locks, take them in this order: board row, then column rows by ascending id, then card rows by ascending id. After taking a lock, re-read the row and re-check existence, `deleted_at`, and permissions before writing. Never lock in the reverse order. Never hold a lock across a network call. The default READ COMMITTED isolation level stays, and no stricter isolation level replaces the locks. Do not add a lock that is not listed here without a new approval. Check: SQL-capture tests that assert the lock clauses and their order, and concurrency tests on separate connections (two simultaneous moves into one column, reorder against column create and column delete, a move against the delete of its destination column, two simultaneous assignments), repeated in a stability run (V-05, outstanding).
+**Rationale:** A fixed order prevents deadlocks, and the re-read prevents acting on stale state. The order itself is a guideline-level rule. The requirements mandate the board, destination column, and assignment locks, and DA-11 approves the others.
 **Concrete Example:**
 ```python
 column = (Column.query.filter_by(id=dest_id).with_for_update().one_or_none())
 if column is None or column.deleted_at is not None:
     raise NotFound()
+# comment creation: FOR SHARE on the card, so its assignee and deleted_at cannot change mid-transaction
+card = db.session.execute(select(Card).where(Card.id == card_id).with_for_update(read=True)).scalar_one_or_none()
 ```
 ---
 ## 6. Security and logging
 ### BE-18 Passwords, secrets, and injection
-**Rule:** Passwords are hashed with a vetted library (the algorithm is a design.md decision) and the hash is never returned, logged, or placed in an error. Login failure returns one generic message for an unknown email and a wrong password. All queries use the SQLAlchemy expression API or bound parameters. String-built SQL (f-strings, `%`, `+`, `text()` with interpolated values) is forbidden. Password policy (UD-21) and email case handling are undecided: code MUST NOT invent them beyond what the requirements state. Check: grep for string-built SQL, a test that no response or log line contains a hash, and an identical-response test for unknown email versus wrong password.
-**Rationale:** NFR-001 and NFR-003.
+**Rule:** Passwords are hashed with Werkzeug `generate_password_hash` using scrypt with explicit parameters written in one module (`security.py`) (DA-05). `scrypt:32768:8:1` is a provisional development configuration only. The final parameters are set after the V-01 security, latency, and memory verification on Render, which is outstanding and must pass before production deployment, and any change needs human approval. The encoded hash, which carries its salt and parameters, is stored in `users.password_hash` and is never returned, logged, or placed in an error, and a plaintext password is never logged. Login failure returns one generic message for an unknown email and a wrong password, and for an unknown email login verifies the submitted password against a fixed dummy hash so that the response time is similar. Email addresses are trimmed and lowercased before every lookup and write (DA-06). All queries use the SQLAlchemy expression API or bound parameters. String-built SQL (f-strings, `%`, `+`, `text()` with interpolated values) is forbidden. The password policy (UD-21) is undecided: code MUST NOT invent one beyond "present and non-empty". Check: grep for string-built SQL, a test that no response or log line contains a hash or a plaintext password, an identical-response test for unknown email versus wrong password, and a test that the stored hash starts with the explicit scrypt parameters.
+**Rationale:** NFR-001 and NFR-003. An explicit, provisional parameter string keeps the cost visible and replaceable in one place until it has been measured on the real instance.
 **Concrete Example:**
 ```python
-user = User.query.filter_by(email=email).one_or_none()
-if user is None or not verify_password(user.password_hash, password):
+SCRYPT_METHOD = "scrypt:32768:8:1"      # provisional development configuration (DA-05); final value only after V-01
+
+def hash_password(password):
+    return generate_password_hash(password, method=SCRYPT_METHOD)
+
+user = User.query.filter_by(email=normalize_email(email)).one_or_none()
+stored = user.password_hash if user else DUMMY_HASH            # same work for an unknown email
+if not check_password_hash(stored, password) or user is None:
     return fail("Invalid email or password.", 401)   # same string for both cases
 ```
 ### BE-19 CORS only for the health route
-**Rule:** Browsers do not call Flask directly, because the Next.js server proxies every call. The only cross-origin access is `GET /api/health` from the configured web origin, without credentials and without allowing the `Authorization` header (API-004). Any other route MUST NOT send CORS headers. The CORS library is a design.md decision. Check: tests that `OPTIONS` and `GET` on other routes carry no `Access-Control-*` header.
+**Rule:** Browsers do not call Flask directly, because the Next.js server proxies every call. The only cross-origin access is `GET /api/health` from the configured web origin (`FRONTEND_ORIGIN`). Use Flask-CORS (DA-12) restricted to that path: `resources={r"/api/health": {...}}`, `origins=[FRONTEND_ORIGIN]`, `methods=["GET"]`, `supports_credentials=False`, and an explicit allowed-headers list that does not contain `Authorization` (the library default for allowed headers is not used). No response carries `Access-Control-Allow-Credentials: true`, and the preflight response does not list `Authorization` (API-004). Any other route MUST NOT send CORS headers. Check: tests that `OPTIONS` and `GET` on every other route carry no `Access-Control-*` header, and tests for API-004-AC01 to AC05 (a preflight from the configured origin is allowed, from another origin it gets no `Access-Control-Allow-Origin`).
 **Rationale:** A broad CORS policy would let other sites call authenticated routes from a browser.
 **Concrete Example:**
 ```python
+CORS(app, resources={r"/api/health": {
+    "origins": [app.config["FRONTEND_ORIGIN"]],
+    "methods": ["GET"],
+    "allow_headers": ["Content-Type"],       # explicit list, no Authorization
+    "supports_credentials": False,
+}})
+
 @app.get("/api/health")
 def health():
-    resp = ok({"status": "ok"})
-    # CORS applied here only, for the configured origin, no credentials
-    return resp
+    return ok({"status": "ok"})              # no database query
 ```
 ---
 ## 7. Testing
@@ -249,11 +272,13 @@ def test_non_member_gets_404_even_with_invalid_body(client, outsider_token, boar
 ## Reviewer checklist
 Not a guideline. A reviewer confirms:
 - The change touches only the eight Blueprints, and routes contain no queries or commits (BE-02, BE-03).
-- Every response uses the envelope, `error` is a plain non-empty string, and 500 bodies are generic (BE-04, BE-05).
+- Every response uses the envelope, `error` is a plain non-empty string, 500 bodies are generic, and a body over 1,048,576 bytes gets 413 with "Request body is too large." (BE-04, BE-05).
+- Configuration comes from the environment with the approved variable names, and the JWT lifetime has no default (BE-01).
 - Routes pass raw JSON to services, and schemas load only after the 404 and 403 checks (BE-03, BE-09).
 - Schemas use `unknown = RAISE`, and numbers are strict (BE-06).
 - Check order is 401, 404, 403, then 400/409 (BE-09), and only the five admin-only operations require administrator (BE-10).
 - Every column or card query filters `deleted_at IS NULL` (BE-11).
-- Writes are atomic, locks follow the order, and events and notifications share the transaction (BE-14, BE-16, BE-17).
+- Writes are atomic, only the approved locks are used in the fixed order under READ COMMITTED, and events and notifications share the transaction (BE-14, BE-16, BE-17).
+- Passwords use explicit scrypt parameters (provisional until V-01), emails are normalized, and CORS is limited to the health route (BE-18, BE-19).
 - Only `card_created`, `card_moved`, and `comment_created` events exist, and assignment appends none (BE-14).
 - New tests include permission, rollback, and concurrency cases (BE-20).

@@ -2,15 +2,15 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft for human review. Not committed. |
+| Status | Draft. DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24, see Section 12.3). The HTTP 413 rule is now in `requirements.md`. Verification obligations V-01 to V-10 are outstanding and nothing in them is verified. UD-01, UD-02, UD-07, UD-09, UD-15, UD-16, UD-17, UD-21, and UD-22 remain open. |
 | Authoritative sources | `specs/requirements.md` (behavior and API contracts), then `specs/PROJECT_BRIEF.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md` |
-| Companion document | `tasks.md` is not part of this deliverable. |
+| Companion document | `specs/tasks.md` is the implementation plan derived from this design. |
 | Rule of precedence | If this document, a guideline, and the requirements disagree, the requirements win. Guideline conflicts found while writing (G-01 to G-04) are listed in Section 12.4 and are all RESOLVED. |
 
 ### Labels used in this document
 - **[Approved]** The item comes from `requirements.md` (a requirement, an approved decision UD-nn, or an approved assumption A-nn).
 - **[Design decision]** A choice made here inside the approved constraints. It adds no endpoint, entity, or page.
-- **[DA-nn]** A design assumption in an area the requirements leave unspecified. Each one is listed in Section 12.3 and needs human confirmation.
+- **[DA-nn]** A design assumption in an area the requirements leave unspecified. Each one was **approved by the human owner** (Limadijaya Suhendra, 2026-11-24) and is recorded in Section 12.3. Approval fixes the decision. It does not mean the decision is verified: outstanding verification obligations (V-nn) are listed in Section 12.3.1.
 - **[NOT APPROVED]** A proposal for one of the nine unresolved decisions (UD-01, UD-02, UD-07, UD-09, UD-15, UD-16, UD-17, UD-21, UD-22). It is not part of the design until a human approves it.
 
 ### Scope counts
@@ -530,7 +530,7 @@ No index covers `position` uniquely (DB-05). Each index is created in a Flask-Mi
 | Hard-delete a comment | One `comments` row | Real `DELETE`. Events and notifications referring to it stay (COMMENT-004-AC06, NOTIF-001-AC09). |
 | Hard-delete a board | Everything that belongs to the board | **Strategy: `ON DELETE CASCADE` declared in the migration** on `board_memberships.board_id`, `columns.board_id`, `cards.column_id`, `comments.card_id`, `notifications.board_id`, and `activity_events.board_id` (BOARD-005-AC08). `users` rows are never touched (BOARD-005-AC07). [DA-14] |
 
-How the cascade stays consistent: `notifications.card_id`, `activity_events.card_id`, `activity_events.from_column_id`, and `activity_events.to_column_id` reference `cards` and `columns` with the default `NO ACTION`. These checks run at the end of the statement, after the `ON DELETE CASCADE` chain from `boards` has removed the notifications and events through their own `board_id`. A migration test (BOARD-005-AC04, AC05, AC08) deletes a board that holds every kind of dependent row, including soft-deleted rows, and asserts zero remaining rows. If PostgreSQL reports a violation in that test, the fallback is the ordered service delete that BOARD-005-AC08 also allows (events, notifications, comments, cards, columns, memberships, board). The choice is made by that test, not by assumption.
+How the cascade stays consistent: `notifications.card_id`, `activity_events.card_id`, `activity_events.from_column_id`, and `activity_events.to_column_id` reference `cards` and `columns` with the default `NO ACTION`. These checks run at the end of the statement, after the `ON DELETE CASCADE` chain from `boards` has removed the notifications and events through their own `board_id`. A migration test (BOARD-005-AC04, AC05, AC08) deletes a board that holds every kind of dependent row, including soft-deleted rows, and asserts zero remaining rows. The cascade strategy is approved (DA-14), and a PostgreSQL integration test is mandatory (verification V-04, not yet run). If PostgreSQL reports a violation in that test, the strategy is **not** switched automatically to ordered service deletes: the failure is reported and a new human approval is requested first.
 
 `ActivityEvent` rows must never be cascade-deleted from a card, column, or comment (DB-09). That is why only `board_id` carries `ON DELETE CASCADE` on that table.
 
@@ -564,9 +564,13 @@ How the cascade stays consistent: `notifications.card_id`, `activity_events.card
 | `JWT_ACCESS_TOKEN_EXPIRES_SECONDS` | yes | Access token lifetime. **No default in code, because UD-01 is unresolved.** |
 | `FRONTEND_ORIGIN` | yes | The single allowed origin for the health route CORS response (API-004-AC03) |
 | `LOG_LEVEL` | no | Logging level |
+| `DB_POOL_SIZE` | no | Size of the SQLAlchemy connection pool. Small. The value is set during verification V-02 [DA-16]. |
+| `DB_MAX_OVERFLOW` | no | Extra connections above the pool size. Small. The value is set during verification V-02 [DA-16]. |
 | `TEST_DATABASE_URL` | tests only | Separate PostgreSQL database (TEST-001-AC03). The test config refuses to start if it equals `DATABASE_URL`. |
 
 Registration order in the factory: config, extensions, CORS (health only), JWT callbacks, error handlers, eight Blueprints under `/api`, then the health route.
+
+`config.py` sets `MAX_CONTENT_LENGTH` to 1,048,576 bytes (1 MiB) as a constant, not an environment variable [DA-07]. The SQLAlchemy engine uses `pool_pre_ping` and the two pool variables above, with small values [DA-16].
 
 ### 4.2 Blueprints [Approved: eight Blueprints per the design outline; BE-02]
 | Blueprint | Endpoints | Requirements |
@@ -639,6 +643,7 @@ def fail(message, status):   return jsonify({"error": message}), status   # mess
 | Duplicate email, duplicate member, reorder collision | 409 | specific sentence per case |
 | Method not allowed | 405 | `Method not allowed.` |
 | Unsupported content type | 415 | `Content-Type must be application/json.` |
+| Request body larger than 1,048,576 bytes | 413 | `Request body is too large.` [DA-07; API-002-AC06, FRONT-023-AC16] |
 | Unhandled exception (identical for every exception, API-002-AC05) | 500 | `Internal server error.` |
 
 The 400 text for validation may name the offending field. It never echoes a submitted value, so a password or token in a body is never reflected.
@@ -652,6 +657,7 @@ The 400 text for validation may name the offending field. It never echoes a subm
 | `ConflictError` | 409 |
 | Invalid JSON body | 400 |
 | `UnsupportedMediaType` | 415 |
+| `RequestEntityTooLarge` | 413 (string envelope, no `data` key; API-002-AC04, AC06) |
 | `MethodNotAllowed` | 405 |
 | Werkzeug `NotFound` (no route, or a path id that is not a UUID) | 404 |
 | `IntegrityError` for the known unique constraints (email, membership) | 409 (race-safe duplicate handling) |
@@ -767,7 +773,7 @@ Rules:
 - Base path `/api`. JSON in, JSON out. Success `{"data": ...}`. Error `{"error": "<non-empty string>"}`.
 - **Auth** column: `JWT` means `Authorization: Bearer <token>` is required and a failure returns 401. Flask receives it only from the Next.js server.
 - **Check order** for every protected endpoint: 401, then 404, then 403, then 400, then 409 (Section 4.8).
-- Every protected endpoint can also return 401, and every endpoint that takes a body can return 400 for invalid JSON, 415 for a wrong content type, and 405 for a wrong method. These are not repeated below. 500 is always the generic error.
+- Every protected endpoint can also return 401, and every endpoint that takes a body can return 400 for invalid JSON, 413 for a body larger than 1,048,576 bytes, 415 for a wrong content type, and 405 for a wrong method. These are not repeated below. 500 is always the generic error.
 - "Non-member" always means the uniform 404 of Section 4.4.
 - Fields marked [DA-03] are design assumptions in areas where the requirements name no exact field set.
 
@@ -986,13 +992,13 @@ Items are numbered 1 to 27. Item 10 is the extension. The other 26 items (1 to 9
 3. A duplicate email returns 409. The database unique constraint is the source of truth, so two simultaneous registrations cannot both succeed.
 4. The page navigates to `/login` with a success toast (FRONT-001-AC03). Registration creates no session and no board.
 
-Password policy (UD-21) is open. Until it is decided, the only password rule is "present and non-empty". A request-size limit (`MAX_CONTENT_LENGTH`) is recommended in Section 11 because an unbounded password makes the hash costly. [DA-07]
+Password policy (UD-21) is open. Until it is decided, the only password rule is "present and non-empty". The approved 1 MiB request body limit (`MAX_CONTENT_LENGTH`, HTTP 413) bounds the size of a password and so the hashing cost. It is not a password policy, and UD-21 stays open. [DA-07]
 
 ### 6.2 Password hashing [Design decision, DA-05; NFR-001]
-- Algorithm: `werkzeug.security.generate_password_hash` with its default method (scrypt) and `check_password_hash`. Werkzeug is already a Flask dependency, so no new package is needed. Salt and cost parameters are embedded in the stored string.
-- The hash is stored in `users.password_hash` and never appears in a response, log line, or error text.
+- Algorithm [DA-05, approved]: `werkzeug.security.generate_password_hash` with the scrypt method and **explicit parameters** written in `security.py`, and `check_password_hash`. The starting parameters are `scrypt:32768:8:1`, which are the current Werkzeug default values made explicit (about 32 MiB of memory per hash). They are a **provisional development configuration**, accepted by the human owner and subject to the V-01 security, latency, and memory verification before production deployment. The final parameters are set only after the Render memory and latency benchmark (verification V-01, not yet run), and any change is taken to the human owner. Werkzeug is already a Flask dependency, so no new package is needed. Salt and cost parameters are embedded in the stored string.
+- The hash is stored in `users.password_hash` and never appears in a response, log line, or error text. A plaintext password is never logged, including in debug output and validation messages.
 - Unknown email and wrong password return the same 401 body. To keep response time similar, login verifies the submitted password against a fixed dummy hash when the email is not found.
-- An alternative (argon2-cffi) is possible. The choice is confined to `security.py`, so changing it later touches one module.
+- An alternative (argon2-cffi) was considered and is not approved. The choice is confined to `security.py`, so a later change touches one module.
 
 ### 6.3 Login and JWT [Approved: AUTH-002, AUTH-003, UD-19]
 1. The Next.js login handler (not browser code) calls `POST /api/auth/login`.
@@ -1008,7 +1014,7 @@ The token lifetime (UD-01) comes from `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`. There 
 | Name | `revotask_session` [DA-04] |
 | `HttpOnly` | yes |
 | `Secure` | yes in production. May be omitted only for local `http://localhost`. |
-| `SameSite` | `Lax` |
+| `SameSite` | `Lax`. FRONT-023-AC01 fixes `Lax`, so a stricter value is used only if a human changes that criterion. |
 | `Path` | `/` |
 | `Domain` | not set (host-only) |
 | `Max-Age` | remaining lifetime of the JWT, so the cookie never outlives `exp` |
@@ -1019,29 +1025,30 @@ Exactly one session cookie is set. Because the JWT is the whole session, a stole
 ### 6.5 Next.js BFF handlers and proxy [Approved: FRONT-023; paths are DA-04]
 | Route (Next.js, not Flask) | Methods | Behavior |
 |---|---|---|
-| `/api/session/login` | POST | Origin and JSON checks. Calls Flask login and `users/me`. Sets the cookie. Returns the profile and `expires_at`. A 401 or 400 from Flask is passed through with its `error`. |
-| `/api/session/logout` | POST | Origin check. Expires the cookie (`Set-Cookie` with a past expiry). Returns 200. |
+| `/api/session/login` | POST | Origin, JSON, and 1 MiB size checks (FRONT-023-AC08, AC16). Calls Flask login and `users/me`. Sets the cookie. Returns the profile and `expires_at`. A 401 or 400 from Flask is passed through with its `error`. |
+| `/api/session/logout` | POST | Origin and 1 MiB size checks (FRONT-023-AC08, AC16). Expires the cookie (`Set-Cookie` with a past expiry). Returns 200. |
 | `/api/session/expire` | GET | Expires the cookie and redirects to `/login`. Used by Server Components that received 401 from Flask, because a Server Component cannot set cookies. |
 | `/api/[...path]` | GET, POST, PATCH, DELETE | The proxy, below. |
 
 Proxy rules (FRONT-023-AC04 to AC08, AC11, AC13, AC14, FE-05):
 1. Forward only to `${API_BASE_URL}/api/<path>`. The target host is fixed by configuration. Any path that normalizes outside `/api` returns 404 and is not forwarded.
 2. Do not forward `POST /api/auth/login`. It returns 404 (the login handler is the only way in).
-3. For POST, PATCH, and DELETE, require `Origin` equal to the application's own origin and `Content-Type: application/json`. A bad Origin returns 403 and a bad content type returns 415. Nothing is forwarded.
+3. For POST, PATCH, and DELETE, require an `Origin` that exactly equals (scheme, host, and port) one of the explicitly trusted origins in `APP_ORIGIN`, and `Content-Type: application/json` (FRONT-023-AC08). A missing, `null`, or unlisted Origin returns 403 and a bad content type returns 415. Nothing is forwarded.
 4. With no session cookie, return 401 and do not forward, except `POST /api/auth/register` and `GET /api/health`, which are forwarded without `Authorization`.
 5. Build the outgoing headers from scratch: `Authorization: Bearer <cookie value>`, `Content-Type`, `Accept`. Drop any `Authorization` and `Cookie` header from the browser.
 6. When Flask returns 401, expire the cookie and return 401.
 7. Return Flask's status and body unchanged. If Flask is unreachable or times out, return `502` or `504` with `{"error": "The service is temporarily unavailable."}` [DA-15]. These two statuses are frontend-only and are not Flask statuses.
 8. Never log the token, the body, or the cookie.
+9. Reject a request body larger than 1,048,576 bytes with 413 and `{"error": "Request body is too large."}` before anything is forwarded, judged from `Content-Length` and from the bytes actually read when that header is missing or too small (FRONT-023-AC16, DA-07).
 
 ### 6.6 CSRF protection [Approved: FRONT-023-AC08]
 Defense in depth for a cookie-authenticated BFF:
 1. `SameSite=Lax` blocks the cookie on cross-site POST, PATCH, and DELETE.
-2. Every state-changing request must carry an `Origin` equal to the app's own origin (403 otherwise).
+2. Every state-changing request must carry an `Origin` that exactly equals one of the explicitly trusted origins (403 otherwise, FRONT-023-AC08).
 3. State-changing requests must be `application/json`, which a cross-site HTML form cannot send without a CORS preflight, and the Next.js app sends no `Access-Control-Allow-*` headers.
 4. Flask has no cookie authentication at all (AUTH-003-AC06) and no CORS for any route except health, so a browser cannot call it with ambient credentials.
 
-The app's own origin is derived from the request's host in the handler and, in production, compared with the `APP_ORIGIN` environment variable [DA-04].
+`APP_ORIGIN` holds the explicitly trusted origins as a comma-separated list of exact origins (scheme, host, and port). In production it contains the production origin, which is the application's own origin. A Vercel preview deployment origin is trusted only when it is listed there. Wildcards, suffix or substring matches, and automatic trust of other preview deployments are not allowed, and a missing or `null` Origin is rejected. The Origin header is checked against this list and is never used to decide trust by itself [DA-04, approved]. Verification V-07 (trusted-origin tests and a deployed check) is not yet done.
 
 ### 6.7 Logout [Approved: FRONT-004]
 `AuthContext.logout()` calls `POST /api/session/logout`, which expires the cookie. The context clears `currentUser`, sets `session` to unauthenticated, and navigates to `/login`. A reload stays unauthenticated (FRONT-004-AC03). The token itself is not revoked on the server (R-04).
@@ -1064,7 +1071,7 @@ Flask `{error: "msg"}` passes unchanged through the proxy. `apiClient.ts` unwrap
 | `DATABASE_URL`, `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `FRONTEND_ORIGIN` | Flask | no | Render environment settings |
 | `API_BASE_URL` | Next.js server | no | Server-side calls and the proxy target |
 | `NEXT_PUBLIC_API_BASE_URL` | Next.js | yes (public by design) | Used only for `GET /api/health` |
-| `APP_ORIGIN` | Next.js server | no | Own origin for the Origin check [DA-04] |
+| `APP_ORIGIN` | Next.js server | no | Explicitly trusted origins (comma-separated exact origins) for the Origin check [DA-04] |
 | `E2E_*` | Playwright | no | Names and provisioning pending UD-22 |
 
 `.env.example` files contain placeholders only. `.env*` files other than the examples are git-ignored. No variable that starts with `NEXT_PUBLIC_` holds a secret.
@@ -1197,21 +1204,23 @@ interface AuthContextValue {
 - A drop calls `moveCardTo(cardId, destColumnId, index)` or `moveColumnTo(columnId, index)`. These two functions are the shared move logic (Section 7.8) and are also used by the non-drag controls.
 - Cards and columns are rendered from the **unfiltered** board state. A search filter only hides elements, so neighbors for the `order` calculation include hidden cards (FRONT-019-AC07).
 
-### 7.8 Keyboard and touch alternatives [Guideline FE-14; DA-18]
-Native drag-and-drop does not work with a keyboard and works poorly on touch screens. Requirements FRONT-019 and NFR-007 do not describe a non-drag alternative. The guideline FE-14 makes it mandatory. This design adds the controls without a new endpoint, field, or library.
+### 7.8 Keyboard and touch alternatives [Approved DA-18; FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06; FE-14]
+Native drag-and-drop is the primary desktop interaction. It does not work with a keyboard and works poorly on touch screens, so cards and columns can also be moved without dragging. The human owner approved the complete design (DA-18, 2026-11-24), and `requirements.md` now holds its acceptance criteria. The controls add no endpoint, no request field, no page, and no drag-and-drop or sortable library.
 
 | Control | Where | Behavior |
 |---|---|---|
-| "Move card" button (`BaseButton`, accessible name "Move card <title>") | each `CardItem` | Opens `CardMoveMenu` (built on `BaseModal`). The user picks a destination column and a place (top, bottom, or before or after a named card). Tab, Enter, Space, and arrow keys work. Escape closes it and returns focus to the button. |
-| "Move column left" and "Move column right" | each `ColumnHeader` | Moves the column one place. Disabled at the ends. |
-| Live region | `BoardView` | `aria-live="polite"` announces "Card moved to <column>, position <n>" and "Column moved". |
+| "Move card" button (`BaseButton`, accessible name contains the card title) | each `CardItem` | Opens `CardMoveMenu` (built on `BaseModal`). Destinations are the active columns. Places are "Top of column" and "After <card title>" for every other card of that column, taken from the unfiltered state. Arrow keys, Tab, Enter, taps work. Escape closes it (FRONT-019-AC17 to AC19). |
+| "Move column left" and "Move column right" (`BaseButton`) | each `ColumnHeader`, for every member | Moves the column one place. Disabled for the first and last column (FRONT-025-AC18 to AC20). |
+| Live region | `BoardView` | One `aria-live="polite"` element. Texts: "Card moved to <column name>, position <n>", "Card could not be moved", "Column moved to position <n>", "Column could not be moved" (FRONT-019-AC23, FRONT-025-AC21). |
 
 Properties:
-- Controls are always visible (no hover), have a tap target of at least 44 by 44 CSS px (Tailwind `min-h-11 min-w-11`), and show `focus-visible` rings. They work at 360 px with no horizontal page scroll (NFR-007).
-- They call `moveCardTo` and `moveColumnTo`, so they use the same optimistic update, the same rollback, the same `order` computation, and the same endpoints as a drop: `PATCH /api/cards/{id}/position` with `{column_id, order}` and `PATCH /api/boards/{id}/columns/reorder` with one entry for the moved column.
-- `order` is a JSON number computed by `ordering.ts` from the neighbors of the chosen place. It is never sent as `position`.
-- The Done/Active toggle and column delete are not moves and keep their administrator-only rule.
-
+- Controls are visible without hover or focus, have a rendered box of at least 44 by 44 CSS px (Tailwind `min-h-11 min-w-11`, also for each option row of the menu), and show `focus-visible` rings. They work at 360 px with no horizontal page scroll (NFR-007-AC04 to AC06).
+- They call `moveCardTo` and `moveColumnTo`, so they use the same optimistic update, the same rollback, the same `order` computation, and the same endpoints as a drop: `PATCH /api/cards/{id}/position` with exactly `{column_id, order}` and `PATCH /api/boards/{id}/columns/reorder` with one entry for the moved column (FRONT-019-AC20, FRONT-025-AC20).
+- `order` is a positive JSON number computed by `ordering.ts` from the neighbors of the chosen place. It is never sent as `position`, and `rebalanced` is never sent.
+- Choosing the current place sends no request (FRONT-019-AC21). A failure restores the previous place and shows an error toast (FRONT-019-AC22).
+- Focus: on open, focus moves into the menu. On close, focus returns to the "Move card" button of the same card, in its new place after a success or its restored place after a failure (FRONT-019-AC19). A column button keeps focus, unless it becomes disabled, then the other move button of that column takes it (FRONT-025-AC21).
+- The controls are shown to every member, administrator or not, because neither endpoint is administrator-only (FRONT-019-AC24). The Done/Active toggle and column delete are not moves and keep their administrator-only rule.
+- Tests: TEST-005-AC12 (React Testing Library, keyboard events only), TEST-009-AC03 (Playwright, taps at 360 px), TEST-009-AC04 (Playwright, keyboard). The Playwright tests are blocked by UD-16 and UD-22 and are not yet run.
 ### 7.9 Ordering computation on the client [Approved: FRONT-019-AC03, AC08, AC11, AC14, AC15; FE-15]
 `ordering.ts` contains pure functions with unit tests:
 ```ts
@@ -1402,7 +1411,7 @@ General rules [Approved: TEST-001, TEST-006, FE-20, FE-21, BE-20]: backend tests
 | Group | Content | Requirement IDs |
 |---|---|---|
 | Endpoint coverage | Every one of the 27 routes exists and rejects a request without a token (except register, login, health). No refresh route, no restore route, one members route. | TEST-001-AC02, AUTH-004, AUTH-002-AC05, COLUMN-003-AC12, BOARD-007-AC10 |
-| API contract | Envelope on every endpoint and error path. Status table of Section 2.3. `Content-Type: application/json`. No `position` key anywhere. Delete returns `{id}`. Login returns only `access_token`. Health body exact. 405, 415, 404, 500 envelopes. | TEST-001-AC04, AC05, API-001 to API-004, UD-19 |
+| API contract | Envelope on every endpoint and error path. Status table of Section 2.3. `Content-Type: application/json`. No `position` key anywhere. Delete returns `{id}`. Login returns only `access_token`. Health body exact. 405, 413, 415, 404, 500 envelopes, and the 1,048,576 and 1,048,577 byte bodies. | TEST-001-AC04, AC05, AC06, API-001 to API-004 (including API-002-AC06), UD-19 |
 | Validation | Schemas with `unknown = RAISE`. `StrictNumber` cases (`0`, negative, `true`, `"1"`, `null`, `NaN`, `Infinity`, `1e400`, `1e-400`). UUID cases. Empty and whitespace text. | CARD-006, COLUMN-004-AC02, AC07 to AC09, A-06, NFR-003 |
 | Authentication | Missing, malformed, wrong-key, and expired tokens return 401 (not 422). Cookie-only token returns 401. `exp` present. Secret from environment. Password hashed and never returned. Identical login failures. | AUTH-001 to AUTH-004, NFR-001, NFR-002, USER-001, USER-002 |
 | Authorization | Matrix of administrator, member, non-member for every board-scoped endpoint. Check order 401, 404, 403, 400/409 (non-member with invalid body gets 404, member without permission with invalid body gets 403). Uniform 404 body. Five administrator-only operations. Comment ownership with no administrator override. Rejected requests change no row and no `updated_at`. | TEST-003, BOARD-006, BOARD-004-AC04, COLUMN-002-AC06, AC11, COLUMN-003-AC13, AC14, COMMENT-003, COMMENT-004, UD-05 |
@@ -1425,8 +1434,9 @@ Vitest is the runner and React Testing Library the component library [Design dec
 | Hooks | `useNotifications` (fake timers: 1 request at 0, 1 at 29,999 ms, 2 at 30,000 ms), debounced search (299 ms vs 300 ms), `useErrorHandler`, `useDragAndDrop`, `AuthContext`. | FRONT-017, FRONT-008, FRONT-018, FRONT-019, NFR-006 |
 | Ordering functions | `computeCardOrder`, `computeColumnOrder`, `normalizeColumns` for midpoint, edges, empty column, no distinct midpoint, hidden cards. | FRONT-019-AC03, AC07, AC08, AC11, AC14, AC15 |
 | Client modules | `apiClient.ts` unwrap and error mapping, 401 handling, no JWT in the browser. | API-005, API-006, API-007, FRONT-022 |
-| BFF handlers and proxy | Called as functions with `Request` objects: cookie attributes, no token in body, Origin and Content-Type checks, path allow-list, header filtering, login path not proxied, 401 cookie expiry. | FRONT-023-AC01 to AC15 |
+| BFF handlers and proxy | Called as functions with `Request` objects: cookie attributes, no token in body, trusted-origin checks (the configured origin and a listed preview origin accepted; missing, `null`, unlisted, suffix, wildcard, and other scheme or port rejected), Content-Type check, 1 MiB size limit with 413, path allow-list, header filtering, login path not proxied, 401 cookie expiry. | FRONT-023-AC01 to AC16, TEST-005-AC13 |
 | Component boundaries | A test lists files with `"use client"` and checks the page files and layouts. | FRONT-021 |
+| Move controls | Keyboard events only: accessible names, menu options including hidden cards, focus, request body equal to a drop, no request for an unchanged place, disabled end buttons, rollback, live-region texts, controls shown to administrators and members, no drag events, no drag-and-drop library. | TEST-005-AC12, FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21 |
 
 ### 10.3 End to end (Playwright)
 | Group | Content | Requirement IDs |
@@ -1435,7 +1445,7 @@ Vitest is the runner and React Testing Library the component library [Design dec
 | Authentication | Successful login and redirect. Invalid credentials. Unauthenticated redirect. Post-logout redirect. | TEST-007, FRONT-002, FRONT-003, FRONT-004 |
 | Kanban journey | Log in, create a board, add two columns, create a card, open and inspect it, drag it to the second column, verify the position, reload and verify it stays. | TEST-008 |
 | Responsive | Core flows at 360 px and 1920 px with no horizontal page scroll. | TEST-009, NFR-007 |
-| Keyboard and touch alternatives | At 360 px, move a card and reorder a column using only taps. With the keyboard only, move a card through `CardMoveMenu` and a column through the move buttons. Assert the same request body as a drag. | FE-14 (guideline, no requirement ID, DA-18) |
+| Keyboard and touch alternatives | At a touch-enabled 360 px viewport, move a card and reorder a column using only taps. At 360 px and 1920 px, with the keyboard only, move a card through `CardMoveMenu` and a column through the move buttons. Assert the same request as a drag, the persisted result after a reload, and a size of at least 44 by 44 CSS px at 360 px. | TEST-009-AC03, TEST-009-AC04, NFR-007-AC04 to AC06 (approved DA-18). Blocked until UD-16 and UD-22 are decided. |
 
 ### 10.4 Preserved open decisions
 - **UD-15** coverage thresholds: no number is set. Coverage is measured and reported only.
@@ -1449,21 +1459,21 @@ Vitest is the runner and React Testing Library the component library [Design dec
 
 ### 11.1 Vercel (frontend) [Approved: NFR-008]
 - Project root directory `frontend/`. Build `next build`. Production URL over HTTPS.
-- Environment variables: `API_BASE_URL` (Render URL), `NEXT_PUBLIC_API_BASE_URL` (Render URL, used only for health), `APP_ORIGIN` (the Vercel production origin) [DA-04]. Both API URLs begin with `https://` (NFR-004-AC02).
+- Environment variables: `API_BASE_URL` (Render URL), `NEXT_PUBLIC_API_BASE_URL` (Render URL, used only for health), `APP_ORIGIN` (the explicitly trusted origins: the production origin, and a preview origin only if it is listed) [DA-04]. Both API URLs begin with `https://` (NFR-004-AC02).
 - The proxy and session handlers run as Node runtime route handlers. Their execution limit must exceed a cold-start Render response, so the proxy sets an upstream timeout and returns 504 on expiry [DA-15].
 - Authenticated responses are never cached (`cache: "no-store"` on server fetches, and no `s-maxage` on proxy responses).
 
 ### 11.2 Render (Flask API) [Approved: NFR-008]
 - Root directory `backend/`. Build `pip install -r requirements.txt`. Start `gunicorn wsgi:app` with a small number of workers and threads sized for the database connection limit.
 - Health check path `/api/health` (API-003). It does not touch the database, so a database outage does not mark the service unhealthy. That is the approved behavior.
-- Environment variables: `DATABASE_URL`, `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `FRONTEND_ORIGIN`, `LOG_LEVEL`. Set in Render, never in the repository.
+- Environment variables: `DATABASE_URL`, `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `FRONTEND_ORIGIN`, `LOG_LEVEL`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`. Set in Render, never in the repository.
 - Dependencies: Flask, Flask-SQLAlchemy, Flask-Migrate, Flask-JWT-Extended, Flask-CORS, marshmallow, a PostgreSQL driver (`psycopg2-binary`), gunicorn.
 
 ### 11.3 Supabase PostgreSQL
 - Used only as a PostgreSQL host. The Flask API is the only client (DB-01).
 - `DATABASE_URL` uses TLS (`sslmode=require`).
-- **Pooler or direct connection is not decided [DA-16].** Considerations for the human decision: a direct connection may be IPv6-only on some plans while Render may need IPv4, a session-mode pooler keeps `SELECT ... FOR UPDATE` semantics identical to a direct connection, and a transaction-mode pooler works for these short transactions but must be tested with the locking tests. Verify against current Supabase documentation before choosing.
-- **Row Level Security and Data API exposure are not decided [DA-17].** Hardening option to confirm: enable RLS on all eight tables with no policies, so the Supabase Data API cannot read them, while the Flask connection role keeps access. This changes no application code.
+- **Session-mode pooling [DA-16, approved].** The Render Flask API connects through the Supabase session-mode pooler. `DATABASE_URL` holds that connection string and is set only in Render. SQLAlchemy uses a small pool that is configurable through `DB_POOL_SIZE` and `DB_MAX_OVERFLOW`, with `pool_pre_ping`. **Verification V-02 is outstanding and nothing is verified yet:** connectivity from Render, `flask db upgrade` through the pooler, the concurrency and row-locking tests (T6.06, T7.08) against it, and the connection limit against the pool size. If verification fails, the connection mode is **not** changed silently: the failure is reported and a new human approval is requested.
+- **Row Level Security [DA-17, approved].** RLS is enabled on all eight application tables with no policies for browser-facing roles, and it is managed through Flask-Migrate and not by hand in the Supabase dashboard. The Supabase Data API is disabled if practical. **Verification V-03 is outstanding and nothing is verified yet:** the database role that Flask uses must read and write all eight tables with RLS enabled, and its permissions must be checked. The Flask-Migrate bookkeeping table `alembic_version` is not an application entity, so its exposure is checked in V-03 and changed only on a human request.
 - The production database is never used by tests (TEST-001-AC03).
 
 ### 11.4 Environment variables summary [Approved: NFR-010]
@@ -1474,6 +1484,8 @@ Vitest is the runner and React Testing Library the component library [Design dec
 | `JWT_ACCESS_TOKEN_EXPIRES_SECONDS` | Render | no | `backend/.env.example` (value pending UD-01) |
 | `FRONTEND_ORIGIN` | Render | no | `backend/.env.example` |
 | `LOG_LEVEL` | Render | no | `backend/.env.example` |
+| `DB_POOL_SIZE` | Render | no | `backend/.env.example` |
+| `DB_MAX_OVERFLOW` | Render | no | `backend/.env.example` |
 | `API_BASE_URL` | Vercel (server) | no | `frontend/.env.example` |
 | `NEXT_PUBLIC_API_BASE_URL` | Vercel (public) | no | `frontend/.env.example` |
 | `APP_ORIGIN` | Vercel (server) | no | `frontend/.env.example` |
@@ -1482,7 +1494,7 @@ No credential or real URL is written in this document or the example files.
 
 ### 11.5 CORS and CSRF boundaries
 - Flask: CORS for `GET /api/health` from `FRONTEND_ORIGIN` only, no credentials, `Authorization` not allowed (API-004).
-- Next.js: no CORS headers on the proxy or session handlers. State-changing requests need a same-origin `Origin` and JSON content type (Section 6.6).
+- Next.js: no CORS headers on the proxy or session handlers. State-changing requests need an `Origin` that exactly matches one of the explicitly trusted origins, a JSON content type, and a body of at most 1,048,576 bytes (Section 6.6, FRONT-023-AC08, AC16).
 - Flask accepts the JWT only from the `Authorization` header, so a browser cannot authenticate to Flask with an ambient cookie.
 
 ### 11.6 Database migrations [Approved: NFR-009]
@@ -1495,7 +1507,7 @@ Render collects stdout. Logs have request id, method, path, status, and duration
 - HTTPS everywhere. Cookie `Secure` and `HttpOnly` (NFR-004-AC03).
 - Secrets only in platform settings. No literal secret in the repository (NFR-002).
 - `FLASK_DEBUG` and the Werkzeug debugger off. Generic 500 body.
-- A request-body size limit (`MAX_CONTENT_LENGTH`) on Flask [DA-07]. The value is not an approved requirement.
+- A 1 MiB (1,048,576 bytes) JSON request body limit at both the Flask and the BFF boundaries, answered with HTTP 413 and the string error envelope [DA-07, approved]. The status is in `requirements.md` Section 2.3 and is specified by API-002-AC06 (Flask) and FRONT-023-AC16 (BFF), and tested by TEST-001-AC06 and TEST-005-AC13. Verification V-06 is outstanding and nothing is verified yet.
 - Response headers on the Next.js app: `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and a frame restriction. The exact set is a [Design decision] limited to headers that do not change behavior.
 - Dependency versions pinned in `requirements.txt` and `package-lock.json`.
 
@@ -1521,42 +1533,61 @@ Every proposal below is **NOT APPROVED**. It is copied or derived from Section 8
 | **UD-21** | Password policy | Only "non-empty" is enforced. `MAX_CONTENT_LENGTH` bounds hash cost without declaring a policy. A policy adds a schema rule and an error message. | Minimum length 8, no composition rules. | Minimum, maximum, and any rule on common passwords. |
 | **UD-22** | E2E account provisioning | Environment variable names for the account are not fixed. A Playwright test needs a user that exists in the target database. | Register the account once through `POST /api/auth/register` and store credentials only in environment variables. | Variable names, who creates the account, and whether tests create their own users instead. |
 
-### 12.2 Other open design items (not numbered decisions)
-These are choices the requirements do not make. This design proposes a direction but a human must confirm it.
+### 12.2 Other design items: decided by the approved assumptions
+These items were open in the first version of this design. The human owner decided them by approving the assumptions named in the last column (2026-11-24). They are no longer open. The verification of each one is listed in Section 12.3.1.
 
-| Item | Direction taken here | Reference |
+| Item | Decision | Reference |
 |---|---|---|
-| Supabase pooler or direct connection | Not decided. Considerations in Section 11.3. | DA-16 |
-| RLS and Supabase Data API exposure | Not decided. Hardening option in Section 11.3. | DA-17 |
-| Password hashing algorithm | Werkzeug scrypt (a single module, replaceable). | DA-05 |
-| Email case handling | Trim and lowercase, then a plain unique constraint. | DA-06 |
-| Text length limits | None declared. `TEXT` columns, a request body size limit. | DA-07 |
-| Foreign-key delete behavior for events | No cascade from card, column, or comment. Only `board_id` cascades. | DA-14 |
-| Board hard-delete strategy | `ON DELETE CASCADE` in the migration, proven by a test, with ordered service deletes as the fallback. | DA-14 |
+| Supabase pooler or direct connection | Session-mode pooling for the Render Flask API, a small configurable SQLAlchemy pool. | DA-16 |
+| RLS and Supabase Data API exposure | RLS on all eight application tables with no browser-facing policies, Data API disabled if practical, managed through migrations. | DA-17 |
+| Password hashing algorithm | Werkzeug scrypt with explicit parameters. | DA-05 |
+| Email case handling | Trim and lowercase everywhere, then a plain unique constraint. | DA-06 |
+| Text length limits | No per-field limits. A 1 MiB JSON request body limit with HTTP 413. | DA-07 |
+| Foreign-key delete behavior for events | No cascade from card, column, or comment. `comment_id` has no foreign key. Only `board_id` cascades. | DA-14 |
+| Board hard-delete strategy | `ON DELETE CASCADE` in the migration. If the PostgreSQL test fails, a new human approval is needed before any other strategy. | DA-14 |
 
-### 12.3 Design assumptions requiring human review
-| ID | Assumption | Where used |
-|---|---|---|
-| DA-01 | The exact `error` wording of Section 4.4. Only status and "non-empty string" are required. | 4.4 |
-| DA-02 | Table names (`users`, `boards`, `board_memberships`, `columns`, `cards`, `comments`, `notifications`, `activity_events`) and model name `BoardColumn`. The requirements name no tables. | 3.1 |
-| DA-03 | Field sets beyond the approved keys: `BoardSummary` timestamps, `Card.completed_at`, `created_at`, `updated_at`, `MyTaskCard.board_id`, `Comment.author` as `{id, name}`, `Comment.updated_at`, `cards` nested under each column in `BoardDetail`. | 5.2 |
-| DA-04 | Next.js route paths (`/api/session/login`, `/api/session/logout`, `/api/session/expire`, `/api/[...path]`), cookie name `revotask_session`, env var `APP_ORIGIN`, and the `?card=` query parameter on the board page. | 6.4, 6.5, 7.2 |
-| DA-05 | Password hashing with Werkzeug scrypt and a dummy hash check for unknown emails. | 6.2 |
-| DA-06 | Email stored trimmed and lowercased. | 3.3, 6.1 |
-| DA-07 | Text trimmed, no length limits, a request body size limit. | 4.7, 6.1, 11.8 |
-| DA-08 | `updated_at` is set explicitly and only on rows whose business fields changed, including cards stamped or cleared by a Done toggle and cards soft-deleted with a column. | 3.2 |
-| DA-09 | A PATCH needs at least one updatable key. An empty object returns 400 for an allowed caller. `PATCH /api/users/me` accepts any non-empty subset of `name` and `email`. | 4.7, 5.x |
-| DA-10 | List orderings for `GET /api/boards` and `GET /api/cards?assignee=me`. | 5.5, 5.7 |
-| DA-11 | Extra locks beyond the required ones: column row for a changed `is_done`, card row for card delete, `FOR SHARE` on the card for comment creation, board row for board delete. | 8.4 |
-| DA-12 | Flask-CORS restricted to `/api/health`. | 4.13 |
-| DA-13 | Notification `message` is stored at creation. `is_read` is a boolean column. | 3.3, 4.11 |
-| DA-14 | `activity_events.comment_id` has no foreign key. Board delete uses `ON DELETE CASCADE`. | 3.3, 3.6 |
-| DA-15 | The proxy returns 502 or 504 with a string `error` when Flask is unreachable or times out. These are frontend-only statuses. | 6.5, 11.1 |
-| DA-16 | Supabase connection type is open. | 11.3 |
-| DA-17 | RLS posture is open. | 11.3 |
-| DA-18 | Keyboard and touch move controls come from guideline FE-14. No requirement ID covers them. | 7.8, 10.3 |
-| DA-19 | `GET /api/cards` rejects any query parameter other than `assignee=me` with 400. | 5.7 |
+### 12.3 Design assumptions: human approval record (DA-01 to DA-19)
+**Approver:** Limadijaya Suhendra (the human project owner). **Date:** 2026-11-24, confirmed by the human owner. This date replaces the value 2026-11-21 that was recorded before the confirmation. The owner approved DA-04, DA-05, DA-07, DA-14, DA-16, and DA-17 individually, and then approved the other 13 explicitly. Kiro transcribed these decisions and did not make them. Every row below is **APPROVED**. Approval of an assumption does not resolve any of the nine unresolved decisions (UD-01, UD-02, UD-07, UD-09, UD-15, UD-16, UD-17, UD-21, UD-22), and it does not mean any deployment or database behavior has been verified.
 
+| ID | Status | Approved decision | Where used |
+|---|---|---|---|
+| DA-01 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The fixed `error` wording of Section 4.4 is approved as written. | 4.4 |
+| DA-02 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Table names `users`, `boards`, `board_memberships`, `columns`, `cards`, `comments`, `notifications`, `activity_events`, and model name `BoardColumn`. | 3.1 |
+| DA-03 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The response fields of Section 5.2: `BoardSummary` timestamps, `Card.completed_at`, `created_at`, `updated_at`, `MyTaskCard.board_id`, `Comment.author` as `{id, name}`, `Comment.updated_at`, and `cards` nested under each column in `BoardDetail`. | 5.2 |
+| DA-04 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Next.js BFF paths (`/api/session/login`, `/api/session/logout`, `/api/session/expire`, `/api/[...path]`), the HttpOnly session cookie `revotask_session` (`Secure` in production, `SameSite=Lax`), explicitly trusted origins in `APP_ORIGIN` with preview origins trusted only when listed, CSRF protection, the proxy allow-list, a server-managed JWT, and card deep links `?card=`. UD-01 and UD-02 stay open. | 6.4, 6.5, 6.6, 7.2 (requirement: FRONT-023-AC08) |
+| DA-05 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Werkzeug scrypt with explicit parameters, secure hash storage, generic login errors, no plaintext password logging, and a Render memory and latency benchmark. UD-21 stays open. | 6.2 |
+| DA-06 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Email addresses are trimmed and lowercased consistently for registration, login, membership, and profile updates. | 3.3, 6.1 |
+| DA-07 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Text trimming and a 1 MiB (1,048,576 byte) JSON request body limit with HTTP 413 and the string envelope, applied at the Flask and BFF boundaries. No arbitrary per-field length limits. UD-21 stays open. | 4.4, 4.7, 6.1, 6.5, 11.8 (requirements: Section 2.3, API-002-AC06, FRONT-023-AC16, TEST-001-AC06, TEST-005-AC13) |
+| DA-08 | APPROVED (Limadijaya Suhendra, 2026-11-24) | `updated_at` is changed only on rows with an actual change. | 3.2 |
+| DA-09 | APPROVED (Limadijaya Suhendra, 2026-11-24) | An empty PATCH body returns 400. The approved no-op behavior for unchanged values is not changed. | 4.7, 5.x |
+| DA-10 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The deterministic orderings of `GET /api/boards` and `GET /api/cards?assignee=me`. | 5.5, 5.7 |
+| DA-11 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The additional locks (column row for a changed `is_done`, card row for card delete, `FOR SHARE` on the card for comment creation, board row for board delete), always taken in the order board, columns by ascending id, cards by ascending id. READ COMMITTED is kept, and concurrency tests are required. | 8.4 |
+| DA-12 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Flask-CORS restricted to `/api/health`. | 4.13 |
+| DA-13 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Notification `message` is stored at creation, and `is_read` is a boolean column. | 3.3, 4.11 |
+| DA-14 | APPROVED (Limadijaya Suhendra, 2026-11-24) | PostgreSQL `ON DELETE CASCADE` for board hard-delete, activity events kept for soft-deleted entities, `activity_events.comment_id` as a plain UUID with no foreign key, and mandatory PostgreSQL integration tests. If the cascades fail, ordered service deletes are not used automatically: a new human approval is requested. | 3.3, 3.6 |
+| DA-15 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The BFF returns HTTP 502 or 504 for upstream failures, with the string error envelope. | 6.5, 11.1 |
+| DA-16 | APPROVED (Limadijaya Suhendra, 2026-11-24) | Supabase session-mode pooling for the Render Flask API, `DATABASE_URL`, a small configurable SQLAlchemy pool, and verification of connectivity, migrations, concurrency, row locking, and connection limits. The connection mode is not changed silently if verification fails. | 4.1, 11.3 |
+| DA-17 | APPROVED (Limadijaya Suhendra, 2026-11-24) | RLS on all eight application tables without browser-facing access policies, the Supabase Data API disabled if practical, verification of the Flask database role and its permissions, and RLS managed through migrations. | 3.8, 11.3 |
+| DA-18 | APPROVED (Limadijaya Suhendra, 2026-11-24) | The complete keyboard and touch accessibility design of FE-14: Move card controls, Move column left and right buttons, 44 by 44 px targets, keyboard interaction, focus management, `aria-live` announcements, and reuse of the approved move endpoints and ordering logic. Acceptance criteria were added to `requirements.md`: FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, TEST-009-AC04. | 7.8, 10.3 |
+| DA-19 | APPROVED (Limadijaya Suhendra, 2026-11-24) | `GET /api/cards` rejects any query parameter other than `assignee=me` with 400, and keeps the `assignee=me` contract. | 5.7 |
+
+Implementation details accepted by the human owner in the final documentation review of T1.01: the pool variables `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` (DA-16), the 413 text `Request body is too large.` (DA-07), and `scrypt:32768:8:1` (DA-05) as a **provisional development configuration**, subject to the V-01 security, latency, and memory verification before production deployment. V-01 is not complete. T4.01 stays actionable and the Render benchmark stays in T15.05.
+
+#### 12.3.1 Verification obligations (all OUTSTANDING, none verified)
+An approved assumption can still fail when it is tested. Each row below is **not verified**. A task that depends on an obligation stays CONDITIONAL in `tasks.md` until the check passes, and a failure is reported to the human owner and not worked around.
+
+| ID | Assumption | Obligation | Planned task |
+|---|---|---|---|
+| V-01 | DA-05 | Benchmark scrypt security parameters, latency, and memory on the chosen Render instance under concurrent logins. `scrypt:32768:8:1` is a provisional development configuration, and this check must pass before production deployment. Record the final parameters. A change needs human approval. | T15.05 |
+| V-02 | DA-16 | Session-mode pooler: connectivity from Render, `flask db upgrade` through it, concurrency and row-locking tests against it, and the connection limit against the pool size. No silent change of connection mode. | T15.01, T15.02, T15.05 |
+| V-03 | DA-17 | RLS enabled on all eight tables by a migration, no browser-facing policies, Data API disabled if practical, Flask database role can read and write, `alembic_version` exposure checked. | T2.08, T2.10, T15.01 |
+| V-04 | DA-14 | PostgreSQL integration test that deletes a fully populated board and finds zero remaining rows. A failure needs a new human approval. | T2.11, T5.05 |
+| V-05 | DA-11 | Concurrency tests on separate connections under READ COMMITTED, and repeated stability runs, for the lock order. | T6.06, T7.08, T14.02 |
+| V-06 | DA-07 | 1 MiB limit tested at the Flask and BFF boundaries (HTTP 413, string envelope; API-002-AC06, FRONT-023-AC16, TEST-001-AC06, TEST-005-AC13), and the platform request-body limit of Vercel checked to be above 1 MiB. | T3.01, T10.05, T15.06 |
+| V-07 | DA-04 | Trusted-origin tests (FRONT-023-AC08, TEST-005-AC13: listed origin accepted, unlisted, missing, and `null` origin rejected with 403, preview origin only when listed, no wildcard or suffix match), and the production cookie flags checked on the deployed site. | T10.05, T10.06, T15.05 |
+| V-08 | DA-15 | Proxy 502 and 504 behavior for an unreachable or slow Flask, including a Render cold start. | T10.05, T15.05 |
+| V-09 | DA-12 | CORS preflight tests locally and a deployed check that no route except health returns a CORS header. | T3.05, T15.05 |
+| V-10 | DA-18 | Keyboard and touch criteria tested with React Testing Library, and Playwright at 360 px and 1920 px. The Playwright part is blocked by UD-16 and UD-22. | T12.07, T14.07, T14.08 |
 ### 12.4 Conflicts between guidelines and requirements: all RESOLVED
 Four conflicts were found between the first versions of the guidelines and the requirements. The guideline files were then corrected (step 7.2), and the design already followed the requirements. The requirements remain authoritative. No conflict in this table is open.
 
@@ -1568,18 +1599,19 @@ Four conflicts were found between the first versions of the guidelines and the r
 | G-04 | **RESOLVED** | `database.md` DB-10 sample uses a `read_at` column. | NOTIF-001-AC06 requires a boolean `is_read` in the item. | RESOLVED. `is_read BOOLEAN`, not null, default false. `database.md` DB-10 now uses `is_read` and forbids `read_at`. |
 
 ### 12.5 Requirement gaps
-- **Keyboard and touch alternatives to drag-and-drop** (guideline FE-14) have no requirement or acceptance criterion. NFR-007 requires usability from 360 px, and FRONT-019 describes drag only. If the controls must be a formal deliverable, `requirements.md` needs criteria. The design includes them (Section 7.8).
+- **Closed.** The keyboard and touch alternatives to drag-and-drop (guideline FE-14) had no acceptance criteria. The human owner approved DA-18, and `requirements.md` now has FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, and TEST-009-AC04. No endpoint, page, or library was added.
+- **Closed: HTTP 413.** DA-07 approves a 1 MiB body limit answered with HTTP 413 and the string envelope. `requirements.md` now lists 413 in Section 2.3 and Section 2.4 and specifies it in API-002-AC04, API-002-AC06, FRONT-023-AC16, TEST-001-AC05, TEST-001-AC06, and TEST-005-AC13. `FRONT-023-AC08` was reworded to state the explicit trusted-origin rule of DA-04.
 - The board page component list in the requirements does not name `CardMoveMenu`, `CardItem`, `AnalyticsPanel`, `ErrorState`, or `CardSearchInput`. They are internal components of the approved page.
 - `completed_at` is exposed in `Card` because the card detail view may show it. The requirements do not require its exposure (DA-03).
 
 ### 12.6 Technical risks and mitigations
 | ID | Risk | Mitigation |
 |---|---|---|
-| R-01 | Native HTML5 drag-and-drop has no keyboard support and unreliable touch support. | Mandatory non-drag controls (Section 7.8) with tests at 360 px and with the keyboard. |
+| R-01 | Native HTML5 drag-and-drop has no keyboard support and unreliable touch support. | Approved non-drag controls (Section 7.8; FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06) with tests at 360 px and with the keyboard (TEST-005-AC12, TEST-009-AC03, TEST-009-AC04). |
 | R-02 | One missed `deleted_at IS NULL` filter leaks soft-deleted data or counts. | Only `queries.py` helpers read columns and cards. A grep test fails on direct queries. Tests soft-delete a column and check every read path. |
 | R-03 | Lock mistakes cause duplicate `order` values or deadlocks. | Fixed lock order (Section 8.4), re-read after every lock, concurrency tests on separate connections. |
 | R-04 | A JWT cannot be revoked. A stolen token works until `exp`. | HttpOnly, Secure, SameSite=Lax cookie, token never in browser JavaScript, short lifetime once UD-01 is decided. No denylist is added without a requirement. |
-| R-05 | The board-delete cascade might fail or leave rows through the `NO ACTION` foreign keys. | The migration test of BOARD-005-AC04, AC05, AC08 decides between cascade and ordered deletes. |
+| R-05 | The board-delete cascade might fail or leave rows through the `NO ACTION` foreign keys. | The mandatory PostgreSQL test of BOARD-005-AC04, AC05, AC08 (V-04). If it fails, the failure is reported and a new human approval is requested. There is no automatic switch to ordered deletes. |
 | R-06 | Float midpoints run out of precision after many moves between the same neighbors. | Card ties rebalance on the server. Columns are normalized by the client through the same endpoint. Both are unit tested at the numeric limits. |
 | R-07 | Render free-plan cold starts exceed latency targets and proxy timeouts. | Upstream timeout and 504 mapping, README measurement procedure that states a warm-up request, UD-16 decision on environments. |
 | R-08 | Flask-JWT-Extended answers 422 for some bad tokens by default. | Override every loader to return 401 with the string envelope. Tests for each failure type. |
@@ -1587,7 +1619,7 @@ Four conflicts were found between the first versions of the guidelines and the r
 | R-10 | The proxy could be used as an open relay or leak the cookie to another host. | Fixed target host from `API_BASE_URL`, `/api` path allow-list, header rebuild, no forwarding of `Cookie` or `Authorization` from the browser. |
 | R-11 | Error boundaries hide server error text in production. | Server Components render errors inline with `ErrorState`. `error.tsx` is only a fallback. |
 | R-12 | Stale client views after concurrent edits (no version fields). | Refetch after a 400 or 409 on columns, after `rebalanced`, and on a failed mutation. Documented limitation (Section 8.5). |
-| R-13 | An unbounded password length increases hashing cost. | Body size limit. Password policy decided under UD-21. |
+| R-13 | An unbounded password length increases hashing cost. | The approved 1 MiB body limit with HTTP 413 (DA-07) and the scrypt benchmark (V-01). The password policy is decided under UD-21. |
 | R-14 | Account enumeration through login timing or messages. | Identical message and a dummy hash verification. The member-add endpoint reveals whether an email is registered to administrators only, as approved (A-13). |
 | R-15 | `GET /api/notifications` cannot be finalized until UD-09 is decided. | Implement it last, behind the open decision. Nothing else depends on its shape. |
 
@@ -1629,12 +1661,10 @@ Checks run after the document was written. Results are measured on this file and
 | 7 | The nine unresolved decisions remain open. | Yes. UD-01, 02, 07, 09, 15, 16, 17, 21, 22 are each listed in Section 12.1 as **NOT APPROVED** with a question, implications, a proposal, and what to confirm. No code path, default, or schema field resolves any of them. |
 | 8 | No new endpoint or entity was silently introduced. | The document names 27 Flask routes, all from the requirements. The Next.js routes `/api/session/*` and `/api/[...path]` are frontend handlers, not Flask endpoints, and are flagged as DA-04. The database has exactly the eight approved entities. |
 | 9 | The document has architecture and ER diagrams. | Yes. A Mermaid `flowchart` architecture diagram (Section 1.1), a Mermaid `erDiagram` (Section 3.4), and three Mermaid sequence diagrams (Section 1.3). |
-| 10 | Conflicts and assumptions needing review. | Section 12.3 holds DA-01 to DA-19, which still need confirmation. Section 12.4 holds G-01 to G-04, all RESOLVED. Section 12.5 holds the requirement gaps. |
+| 10 | Conflicts and assumptions. | Section 12.3 records the human approval of DA-01 to DA-19 (2026-11-24). Section 12.3.1 lists verification obligations V-01 to V-10, none of which is verified. Section 12.4 holds G-01 to G-04, all RESOLVED. Section 12.5 holds the requirement gaps. |
 
-Items for the human reviewer before `tasks.md` is written:
-1. Confirm or change the design assumptions DA-01 to DA-19.
-2. Decide whether keyboard and touch move controls need requirement criteria (Section 12.5).
-3. Decide the open items of Section 12.2 (Supabase connection, RLS) and the nine unresolved decisions. `GET /api/notifications` stays blocked until UD-09.
-
-
-
+Status after the approvals of 2026-11-24:
+1. DA-01 to DA-19 are approved by the human owner (Section 12.3).
+2. Verification obligations V-01 to V-10 are outstanding (Section 12.3.1). Nothing in them is verified.
+3. UD-01, UD-02, UD-07, UD-09, UD-15, UD-16, UD-17, UD-21, and UD-22 are still open. `GET /api/notifications` stays blocked until UD-09.
+4. The approval date 2026-11-24 was confirmed by the human owner. HTTP 413 is now in the requirements (Section 12.5).

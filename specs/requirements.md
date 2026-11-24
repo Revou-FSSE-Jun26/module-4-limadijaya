@@ -82,6 +82,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 - A successful response body is `{ "data": ... }`. An error response body is `{ "error": "<message>" }`. [Approved]
 - Every endpoint except `POST /api/auth/register`, `POST /api/auth/login`, and `GET /api/health` requires a valid JWT. [Approved]
 - A success response never contains an `error` key, an error response never contains a `data` key, the `error` value is a non-empty string, and every response that has a body uses `Content-Type: application/json`. [Approved, UD-19]
+- A JSON request body is limited to 1 MiB (1,048,576 bytes). A larger body is rejected with HTTP 413 and the standard error envelope `{ "error": "<non-empty string>" }`, both by the Flask API (API-002-AC06) and by the Next.js BFF before anything is forwarded (FRONT-023-AC16). A body of exactly 1,048,576 bytes is not rejected because of its size. [Approved, DA-07, by the human owner]
 - A successful POST that creates a resource returns the created resource, and a successful PATCH returns the complete updated public resource. A successful DELETE returns `{ "data": { "id": "<uuid>" } }` with HTTP 200 and never HTTP 204. A successful GET that lists resources returns an array in `data`, which is `[]` when the list is empty. No success response contains a password, a password hash, or a token other than the `access_token` of the login response. [Approved, UD-19]
 - The reorder response of `PATCH /api/boards/{id}/columns/reorder` is a specific approved contract: an array of all active columns in ascending `order` (UD-20, COLUMN-004). The response of `PATCH /api/cards/{id}/position` is also a specific approved contract: the moved card with its authoritative `order` and a boolean `rebalanced` (UD-06, CARD-005). The response contract of one endpoint is still pending and is an exception to the general body rules above until it is decided: the pagination shape of `GET /api/notifications` (UD-09). A more specific approved endpoint rule always overrides these general rules. [Approved, UD-19 and UD-20]
 
@@ -110,6 +111,7 @@ Browser -> Vercel (Next.js) -> HTTPS /api/* with JWT -> Render (Flask) -> SQLAlc
 | 409 | A reorder request whose final `order` values collide with an active column that the request does not list | Approved (UD-20) |
 | 409 | Registration or profile update with an email already in use | Approved (UD-19) |
 | 415 | An unsupported content type (framework-level, Section 2.4) | Approved (UD-19) |
+| 413 | A request body larger than 1 MiB (1,048,576 bytes), rejected by the Flask API or by the Next.js BFF (framework-level, Section 2.4) | Approved (DA-07) |
 | 500 | Unhandled server error, with a generic message that exposes no stack trace, SQL statement, token, or internal exception detail | Approved (UD-19) |
 
 ### 2.4 Authorization check order [Approved, UD-05]
@@ -126,7 +128,7 @@ Rules that follow from the order:
 - A soft-deleted column or card returns 404 to administrators and members alike, so a member's `DELETE /api/columns/{id}` on an already soft-deleted column returns 404, not 403.
 - A rejected request changes no row (BOARD-006-AC07).
 
-**Exception for framework-level parsing.** A request that cannot be parsed or routed may be rejected earlier by the framework: a body that is not valid JSON (HTTP 400), an unsupported content type (HTTP 415), an unsupported method (HTTP 405), or a route that does not match, including a path ID that is not a valid UUID (HTTP 404). These responses depend only on the shape of the request, never on whether the resource exists or on the caller's membership, so the uniform 404 rule for resource access is not weakened.
+**Exception for framework-level parsing.** A request that cannot be parsed or routed may be rejected earlier by the framework: a body that is not valid JSON (HTTP 400), a body larger than 1 MiB (HTTP 413), an unsupported content type (HTTP 415), an unsupported method (HTTP 405), or a route that does not match, including a path ID that is not a valid UUID (HTTP 404). These responses depend only on the shape of the request, never on whether the resource exists or on the caller's membership, so the uniform 404 rule for resource access is not weakened.
 
 ## 3. Backend Requirements
 
@@ -756,14 +758,15 @@ Every successful JSON response MUST use the `{ "data": ... }` envelope and the s
 - **API-001-AC08** No successful response body contains a password, a password hash, or a JWT, except the `access_token` in the login response.
 
 ### API-002 Error response envelope
-Every error response MUST use the `{ "error": "..." }` envelope.
+Every error response MUST use the `{ "error": "..." }` envelope. A request body larger than 1 MiB (1,048,576 bytes) is rejected with HTTP 413 and the same envelope (approved, DA-07).
 
 **Acceptance criteria**
 - **API-002-AC01** Responses with status 400, 401, 403, and 404 each have a body that is a JSON object with a top-level `error` string and no `data` key.
 - **API-002-AC02** A request to a route that does not exist returns HTTP 404 with a JSON `error` body, not an HTML page.
 - **API-002-AC03** An unhandled exception returns HTTP 500 with a JSON `error` body that does not contain a stack trace or file path.
-- **API-002-AC04** Responses with status 405, 409, 415, and 500, like those with 400, 401, 403, and 404, have a body that is a JSON object with a top-level `error` string and no `data` key. For every error status the `error` value is a non-empty string, including validation failures (approved, UD-19).
+- **API-002-AC04** Responses with status 405, 409, 413, 415, and 500, like those with 400, 401, 403, and 404, have a body that is a JSON object with a top-level `error` string and no `data` key. For every error status the `error` value is a non-empty string, including validation failures (approved, UD-19).
 - **API-002-AC05** The `error` text of an HTTP 500 response is a generic message that is the same for every kind of unhandled exception, and it contains no stack trace, file path, SQL statement, token, exception class name, or other internal detail (approved, UD-19).
+- **API-002-AC06** The Flask API limits a request body to 1 MiB (1,048,576 bytes) (approved, DA-07). A request whose body is exactly 1,048,576 bytes is not rejected because of its size. A request whose body is 1,048,577 bytes or larger returns HTTP 413 with `Content-Type: application/json` and a body that is a JSON object with a non-empty `error` string and no `data` key. The `error` text is generic and repeats no part of the body, and no row is changed. The limit applies to every endpoint that accepts a JSON body. The decision depends only on the size of the body, never on whether the resource exists or on the caller's membership (Section 2.4).
 
 ### API-003 Health check
 `GET /api/health` MUST report that the API is running, with HTTP 200 and `{ "data": { "status": "ok" } }` (approved, UD-19). It performs no database check and returns no dependency diagnostics, version information, or environment details.
@@ -1015,7 +1018,7 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-024-AC06** The link has an accessible name that includes the board name.
 
 ### FRONT-025 ColumnHeader.tsx
-`ColumnHeader.tsx` MUST show a column's name and card count and provide a rename control to every board member. It MUST provide the delete control and the Done/Active toggle only to a Board Administrator, and it MUST NOT offer either to Board Members (approved, UD-05). It is a Client Component.
+`ColumnHeader.tsx` MUST show a column's name and card count and provide a rename control to every board member. It MUST provide the delete control and the Done/Active toggle only to a Board Administrator, and it MUST NOT offer either to Board Members (approved, UD-05). It MUST also provide "Move column left" and "Move column right" buttons to every board member, because reordering columns is not an administrator-only operation (approved, DA-18, by the human owner on 2026-11-24). It is a Client Component.
 
 **Acceptance criteria**
 - **FRONT-025-AC01** The file exports a TypeScript interface `ColumnHeaderProps` that declares `columnId: string`, `name: string`, `cardCount: number`, `onRename` with a typed signature, and `onDelete` with a typed signature, `isDone: boolean`, `isAdministrator: boolean`, and `onToggleDone` with a typed signature, and `tsc --noEmit` with `strict` enabled passes with no `any` in the props.
@@ -1035,6 +1038,10 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-025-AC15** After a successful toggle, the board analytics are refreshed: a new request for `GET /api/boards/{id}/analytics` is made, directly or by refreshing the server-rendered data, and the analytics panel shows the new response. After a failed toggle, no analytics request is made.
 - **FRONT-025-AC16** When `isAdministrator` is true, the delete control is present. When `isAdministrator` is false, the delete control is not present in the DOM, and the rename control is still present and works.
 - **FRONT-025-AC17** When `DELETE /api/columns/{id}` or the toggle request fails with HTTP 403, an error toast shows the `error` message and the column, its cards, and its Done/Active state stay as they were.
+- **FRONT-025-AC18** `ColumnHeader` renders a "Move column left" button and a "Move column right" button, both with `BaseButton`, for every board member, whether Board Administrator or Board Member. Each accessible name contains the column name. The buttons are visible without hover or focus, can be reached with the Tab key, and are activated with Enter or Space.
+- **FRONT-025-AC19** `ColumnHeaderProps` also declares `canMoveLeft: boolean`, `canMoveRight: boolean`, and `onMove` with a typed signature that takes the column ID and the direction, and `tsc --noEmit` passes. The left button is disabled for the first active column and the right button is disabled for the last active column. Activating a disabled button sends no request.
+- **FRONT-025-AC20** Activating an enabled button sends one `PATCH /api/boards/{id}/columns/reorder` whose `columns` list has exactly one entry, the moved column's `id` and its new `order`, computed for the destination place with the rules of FRONT-019-AC08, and with the normalization of FRONT-019-AC11 when no distinct value exists. On success, the displayed columns are replaced by the response array (FRONT-019-AC09). On HTTP 400 or 409, the previous order is restored, an error toast is shown, and the board is refetched (FRONT-019-AC10, AC13). Any other failure restores the previous order and shows an error toast.
+- **FRONT-025-AC21** After a successful column move, the `aria-live="polite"` element of FRONT-019-AC23 contains "Column moved to position <n>", where n is the 1-based place among the active columns, and after a failed column move it contains "Column could not be moved". After the move, keyboard focus stays on the activated button, or moves to the other move button of the same column when the activated button becomes disabled.
 
 ### FRONT-026 AddCardForm.tsx
 `AddCardForm.tsx` MUST let a user add a card to one column. It is a Client Component.
@@ -1078,7 +1085,7 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-018-AC09** The JWT string does not appear in the `AuthContext` value, in `document.cookie`, in `localStorage`, or in `sessionStorage`.
 
 ### FRONT-019 useDragAndDrop
-`useDragAndDrop` MUST move cards and columns by drag-and-drop with optimistic updates and rollback.
+`useDragAndDrop` MUST move cards and columns by drag-and-drop with optimistic updates and rollback. Native HTML5 drag-and-drop is the primary desktop interaction. Cards and columns MUST also be movable without dragging, through keyboard-operable and touch-operable controls (approved, DA-18, by the human owner on 2026-11-24). These controls call the same move logic, the same two endpoints (`PATCH /api/cards/{id}/position` and `PATCH /api/boards/{id}/columns/reorder`), and the same FLOAT `order` computation as a drop. They add no endpoint, no request field, no page, and no drag-and-drop or sortable library. They are specified in FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, and NFR-007-AC04 to AC06.
 
 **Acceptance criteria**
 - **FRONT-019-AC01** When a card is dropped on another column, the card appears in the target column before the API response arrives.
@@ -1097,6 +1104,14 @@ The `/profile` page MUST show and edit the user's name and email and MUST NOT of
 - **FRONT-019-AC14** When no distinct positive float exists strictly between the `order` values of the neighbors of a dropped card (the computed midpoint equals a neighbor's `order`, or no positive value is smaller than the first card's `order`), the frontend sends the `order` of the neighbor that must follow the dropped card, so that the service layer resolves the tie and rebalances (approved, UD-06). The request is the same `PATCH /api/cards/{id}/position` with the same body shape.
 - **FRONT-019-AC15** An ordinary card drop, whose neighbors have a distinct midpoint, sends the midpoint and nothing else. The frontend applies no minimum-gap threshold, sends no separate rebalance request, and sends no `rebalanced` field.
 - **FRONT-019-AC16** After a successful card move, the card's displayed `order` is the `order` in the response. When `rebalanced` is true, the frontend refetches the latest board state and replaces the `order` of all displayed cards, with no partial result shown.
+- **FRONT-019-AC17** Every card on `/boards/[id]` has a "Move card" button rendered with `BaseButton`, whose accessible name contains the card title. The button is visible without hover or focus, can be reached with the Tab key, and Enter or Space opens `CardMoveMenu`, a dialog built on `BaseModal`.
+- **FRONT-019-AC18** `CardMoveMenu` lists every active column of the board as a destination. For the selected destination it lists the places "Top of column" and "After <card title>" for every other card of that column, taken from the unfiltered board state, so cards hidden by a search filter are included. For an empty column only "Top of column" is listed. The user can choose a destination and a place with the arrow keys, Tab, Enter, and taps, and Escape closes the menu.
+- **FRONT-019-AC19** On open, keyboard focus moves into `CardMoveMenu`. On close, whether by Escape, cancel, or confirm, focus returns to the "Move card" button of the same card (FRONT-015-AC04): after a successful move, the button of the card in its new place, and after a failed move and rollback, the button of the card in its restored place. Escape sends no request.
+- **FRONT-019-AC20** Confirming a destination and a place sends one `PATCH /api/cards/{id}/position` whose body contains exactly `column_id` and `order`, equal to the body that a drop on the same place would send. The `order` is computed with the rules of FRONT-019-AC03, AC07, and AC14 from the neighbors in the unfiltered state, is a positive JSON number, and the body has no `position` key and no `rebalanced` key.
+- **FRONT-019-AC21** Choosing the card's current column and its current place sends no request and changes no state, as in FRONT-019-AC05. Choosing a different place in the same column sends the request of FRONT-019-AC20.
+- **FRONT-019-AC22** A move through `CardMoveMenu` has the same optimistic update, rollback, error toast, and `rebalanced` refetch as a drop (FRONT-019-AC01, AC04, AC16): the card appears in its target place before the response arrives, a non-2xx status or a network error restores the previous column and place and shows an error toast, and `rebalanced` true triggers a refetch that replaces the displayed `order` values.
+- **FRONT-019-AC23** The board view contains exactly one element with `aria-live="polite"`. After a successful card move it contains the text "Card moved to <column name>, position <n>", where n is the 1-based place of the card among the active cards of the destination column, and after a failed card move it contains "Card could not be moved". Each announcement appears once per move.
+- **FRONT-019-AC24** The card move controls are shown to every board member, both Board Administrators and Board Members, because `PATCH /api/cards/{id}/position` is not an administrator-only operation (UD-05). They add no endpoint, request field, or page. They work without any `dragstart`, `dragover`, or `drop` event and without hover, and the frontend package manifest lists no drag-and-drop or sortable library. A 401 response is handled as in API-005-AC05, and any other failure (400, 404, 409, 500, or a network error) is handled as in FRONT-019-AC22.
 
 ### FRONT-020 useErrorHandler
 `useErrorHandler` MUST turn errors into user-visible messages.
@@ -1126,7 +1141,7 @@ Server Components MUST fetch authenticated data on the Next.js server with the J
 - **FRONT-022-AC04** While a client-side mutation is pending, the `BaseButton` that triggered it is in its loading state, and a second activation sends no second request.
 
 ### FRONT-023 Cookie session and server-side proxy
-The Next.js server MUST keep the JWT in an HttpOnly cookie, read it only through a server-only session module, and forward it to Flask in the `Authorization: Bearer` header. Browser JavaScript, `AuthContext`, and Client Component props MUST NOT receive the raw JWT. This requirement implements the approved decision UD-03. The token lifetime (UD-01) and refresh strategy (UD-02) are unresolved. The cookie lifetime follows whatever token lifetime is approved.
+The Next.js server MUST keep the JWT in an HttpOnly cookie, read it only through a server-only session module, and forward it to Flask in the `Authorization: Bearer` header. Browser JavaScript, `AuthContext`, and Client Component props MUST NOT receive the raw JWT. This requirement implements the approved decision UD-03. The token lifetime (UD-01) and refresh strategy (UD-02) are unresolved. The cookie lifetime follows whatever token lifetime is approved. The proxy and the session route handlers also limit a request body to 1 MiB (FRONT-023-AC16).
 
 **Acceptance criteria**
 - **FRONT-023-AC01** After a successful login through the session login route handler, the response sets exactly one session cookie with these attributes: `HttpOnly`; `Secure` in production (it MAY be omitted only for local development over `http://localhost`); `SameSite=Lax`; `Path=/`; no `Domain` attribute, so the cookie is host-only; and a `Max-Age` equal to the remaining lifetime of the JWT, so the cookie expires no later than the JWT `exp` time.
@@ -1136,7 +1151,7 @@ The Next.js server MUST keep the JWT in an HttpOnly cookie, read it only through
 - **FRONT-023-AC05** A proxy request with no session cookie returns HTTP 401 with an `error` body and is not forwarded to Flask. The exceptions are `POST /api/auth/register` and `GET /api/health`, which are forwarded without an `Authorization` header.
 - **FRONT-023-AC06** When Flask returns HTTP 401 to a proxied request, the proxy expires the session cookie and returns HTTP 401.
 - **FRONT-023-AC07** The proxy forwards only to paths under `/api` on the host in `API_BASE_URL`, and a request for any other path or host is rejected with HTTP 404 and not forwarded.
-- **FRONT-023-AC08** Every POST, PATCH, or DELETE request to the proxy and to the session login and logout route handlers must carry an `Origin` header equal to the application's own origin. A request with a different or missing `Origin` returns HTTP 403 and is not forwarded or processed (CSRF protection).
+- **FRONT-023-AC08** Every POST, PATCH, or DELETE request to the proxy and to the session login and logout route handlers must carry an `Origin` header that exactly equals (scheme, host, and port) one of the explicitly configured trusted origins: the application's own origin, or a preview deployment origin that is explicitly listed in the configuration (approved, DA-04). Wildcards, suffix or substring matches, and automatic trust of other preview deployments are not allowed. A missing, `null`, or unlisted `Origin` returns HTTP 403 and is not forwarded or processed (CSRF protection).
 - **FRONT-023-AC09** Importing the server-side session module into a Client Component causes `next build` to fail.
 - **FRONT-023-AC10** The logout route expires the session cookie, and a following protected request is rejected with HTTP 401 or a redirect to `/login`.
 - **FRONT-023-AC11** The generic proxy does not forward `POST /api/auth/login`. A browser request for it through the proxy returns HTTP 404. Login is handled only by the session login route handler, so no response sent to the browser contains the JWT.
@@ -1144,6 +1159,7 @@ The Next.js server MUST keep the JWT in an HttpOnly cookie, read it only through
 - **FRONT-023-AC13** The proxy discards any `Authorization` header and any `Cookie` header sent by the browser, and calls Flask with only the `Authorization: Bearer` header built from the session cookie.
 - **FRONT-023-AC14** A POST, PATCH, or DELETE request to the proxy whose `Content-Type` is not `application/json` returns HTTP 415 and is not forwarded.
 - **FRONT-023-AC15** Page files and Client Components contain no direct read of the session cookie. Server Components obtain authentication only through the server-only session module.
+- **FRONT-023-AC16** The proxy and the session login and logout route handlers limit a request body to 1 MiB (1,048,576 bytes) (approved, DA-07). A POST, PATCH, or DELETE request whose body is larger than 1,048,576 bytes, judged from `Content-Length` and, when that header is missing or too small, from the number of bytes actually read, returns HTTP 413 with `{ "error": "<non-empty string>" }`, is not forwarded to Flask, and is not processed. A body of exactly 1,048,576 bytes is not rejected because of its size. The `error` text repeats no part of the body.
 
 ### 4.5 API client and utilities
 
@@ -1188,7 +1204,8 @@ The backend MUST have a pytest suite that covers every endpoint in Section 3.0.
 - **TEST-001-AC02** A test compares the Flask URL map with the endpoint list in Section 3.0 (the 26 mandatory endpoints and the approved membership extension). It fails if a listed endpoint is missing or has no test, or if the map contains any other route under `/api`.
 - **TEST-001-AC03** The test configuration uses a database separate from the production Supabase database.
 - **TEST-001-AC04** A parametrized contract test covers each of the 27 endpoints (the 26 mandatory endpoints and the approved extension) and asserts the success status of Section 2.3, the `{ "data": ... }` envelope with no `error` key, the `Content-Type: application/json` header, and the `data` type (an object, or an array for the three list endpoints of API-001-AC06). It asserts the exact bodies of the login response (`{ "access_token": ... }`), the health response (`{ "status": "ok" }`), and the four delete responses (`{ "id": ... }`, with a repeated delete returning 404 and no HTTP 204). The three pending contracts of API-001 are excluded.
-- **TEST-001-AC05** Tests assert the error envelope for each of the statuses 400, 401, 403, 404, 405, 409, 415, and 500: the body is a JSON object with a non-empty `error` string and no `data` key. They trigger 405 with an unsupported method, 415 with an unsupported content type, and 500 through a failing route that exists only in the test configuration, and assert that the 500 message is generic and contains no stack trace, SQL, token, or exception class name (API-002-AC04, AC05).
+- **TEST-001-AC05** Tests assert the error envelope for each of the statuses 400, 401, 403, 404, 405, 409, 413, 415, and 500: the body is a JSON object with a non-empty `error` string and no `data` key. They trigger 405 with an unsupported method, 413 with a body of 1,048,577 bytes, 415 with an unsupported content type, and 500 through a failing route that exists only in the test configuration, and assert that the 500 message is generic and contains no stack trace, SQL, token, or exception class name (API-002-AC04, AC05, AC06).
+- **TEST-001-AC06** A test sends a JSON body of exactly 1,048,576 bytes and a JSON body of 1,048,577 bytes to an endpoint that accepts a body, as an authenticated member. It asserts that the first is not rejected because of its size, and that the second returns HTTP 413 with `Content-Type: application/json`, a non-empty `error` string, no `data` key, a generic text that repeats no part of the body, and no changed row (API-002-AC06).
 
 ### TEST-002 Comment response tests
 The backend suite MUST test the comment status codes.
@@ -1265,6 +1282,8 @@ The frontend MUST have React Testing Library tests for its components and hooks.
 - **TEST-005-AC09** Tests cover the assignee dropdown in FRONT-011-AC05 to AC13: the displayed assignee, the member options and the "Unassigned" option, the request body for an assignment and an unassignment, the success state, restoring the previous assignee with an error toast on failure, the pending state, keyboard operation, and the absence of assignment controls in `AddCardForm`.
 - **TEST-005-AC10** Tests cover `NotificationBell` in FRONT-016-AC05 to AC14 and `useNotifications` in FRONT-017-AC06: the item content, the read and unread distinction, marking as read, navigation to the board, the "This card is no longer available" state, the absence of comment text, a generic error message, polling with fake timers, and keyboard operation.
 - **TEST-005-AC11** Tests cover the analytics panel in FRONT-007-AC03 to AC08: the week label computed in UTC for a week inside a month, across a month, and across a year, run with the process time zone set to `Asia/Jakarta` and `America/Los_Angeles`, zero counts displayed as 0, the empty-board message, the order of members as returned, the absence of time zone and range controls, and the refresh after card and Done/Active mutations.
+- **TEST-005-AC12** Tests cover the card and column move controls of FRONT-019-AC17 to AC24 and FRONT-025-AC18 to AC21 using keyboard events only: the accessible names, the destinations and places listed in `CardMoveMenu` including cards hidden by a search filter, focus on open and on close, a request body equal to the body of a drop, no request for an unchanged place, the disabled end buttons, the optimistic update and the rollback after a failed request, the live-region texts, the controls shown to both an administrator and a member, and the absence of drag events and of a drag-and-drop library in the package manifest.
+- **TEST-005-AC13** Tests cover FRONT-023-AC08 and AC16 with a mocked Flask API. For the origin check on the proxy and on the session login and logout handlers, the configured application origin and an explicitly listed preview origin are accepted, and a missing `Origin`, the value `null`, an unlisted preview origin, a host that merely ends with or contains a trusted host, a wildcard entry, and a different scheme or port are rejected with HTTP 403 and not forwarded. For the size limit, a body of 1,048,576 bytes is not rejected because of its size, and a body of 1,048,577 bytes is rejected with HTTP 413 and the error envelope and is not forwarded, both when `Content-Length` is present and when it is missing.
 
 ### TEST-006 Playwright suite rules
 Playwright end-to-end tests MUST run against the deployed Vercel frontend.
@@ -1302,11 +1321,13 @@ Playwright MUST cover the approved eight-step Kanban journey in a single test.
 - **TEST-008-AC08** Step 8: after a page reload, the card is still shown in the second column.
 
 ### TEST-009 Playwright responsive tests
-Playwright MUST verify layouts at mobile and desktop widths.
+Playwright MUST verify layouts at mobile and desktop widths, and MUST verify that cards and columns can be moved with taps and with the keyboard.
 
 **Acceptance criteria**
 - **TEST-009-AC01** Playwright projects run the layout checks at a 360 px wide viewport and at a 1920 px wide viewport.
 - **TEST-009-AC02** At both widths, on each page in Section 4.2, the document's scroll width does not exceed its client width.
+- **TEST-009-AC03** At a touch-enabled 360 px viewport, Playwright moves a card to another column and reorders a column using taps only and no drag event, waits on observable conditions and never on a fixed delay (TEST-006), and verifies after a page reload that the card and the column order persist.
+- **TEST-009-AC04** At 360 px and at 1920 px, Playwright moves a card and reorders a column using only the keyboard (Tab, Enter, Space, the arrow keys, and Escape), and at 360 px it reads the bounding boxes of the move controls and asserts that each is at least 44 CSS px by 44 CSS px.
 
 ### TEST-010 Deletion and retention tests
 The backend pytest suite MUST cover soft deletion of columns and cards, preservation of card foreign keys, hard deletion of boards, activity-event retention (approved, UD-18 and UD-23), and the administrator-only authorization of column and board deletion (approved, UD-05). These tests run against PostgreSQL.
@@ -1390,12 +1411,15 @@ The frontend MUST limit the rate of search filtering and the rate of notificatio
 - **NFR-006-AC02** While a protected page stays open for 90 seconds, `GET /api/notifications` is requested 4 times, once on load and once every 30 seconds.
 
 ### NFR-007 Responsive design
-The application MUST be usable at viewport widths from 360 px to 1920 px.
+The application MUST be usable at viewport widths from 360 px to 1920 px, including moving cards and columns without dragging (approved, DA-18, by the human owner on 2026-11-24).
 
 **Acceptance criteria**
 - **NFR-007-AC01** At widths of 360, 768, 1280, and 1920 px, no page in Section 4.2 has a horizontal page scroll bar.
 - **NFR-007-AC02** At 360 px, every column and card on `/boards/[id]` can be reached by scrolling inside the board area, and no card text is clipped.
 - **NFR-007-AC03** At 360 px, all interactive controls on `/login` can be activated without zooming, and no control overlaps another.
+- **NFR-007-AC04** At 360 px, the "Move card", "Move column left", and "Move column right" controls on `/boards/[id]`, and every option row in `CardMoveMenu`, each have a rendered box of at least 44 CSS px by 44 CSS px, and no such control overlaps another interactive control.
+- **NFR-007-AC05** At 360 px, a user can move a card to another column and reorder a column by tapping only, with no drag event, no hover, and no keyboard, and after a page reload the card and the column order are the same as after the move.
+- **NFR-007-AC06** At 360 px, opening `CardMoveMenu` and moving a column cause no horizontal page scroll bar, and the menu content stays inside the viewport with no clipped option text.
 
 ### NFR-008 Deployment architecture
 The system MUST be deployed with a Supabase PostgreSQL database, a Render Flask API, and a Vercel frontend.
@@ -1793,6 +1817,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | API-002 | API-002-AC03 | Flask error handlers (500) |
 | API-002 | API-002-AC04 | Flask error handlers |
 | API-002 | API-002-AC05 | Flask error handlers (500) |
+| API-002 | API-002-AC06 | Flask error handlers (413, request size limit) |
 | API-003 | API-003-AC01 | GET /api/health |
 | API-003 | API-003-AC02 | GET /api/health (deployed on Render) |
 | API-003 | API-003-AC03 | GET /api/health |
@@ -1925,6 +1950,10 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-025 | FRONT-025-AC15 | Page /boards/[id] (analytics panel) |
 | FRONT-025 | FRONT-025-AC16 | ColumnHeader.tsx and Page /boards/[id] (board view container) |
 | FRONT-025 | FRONT-025-AC17 | ColumnHeader.tsx and Page /boards/[id] (board view container) |
+| FRONT-025 | FRONT-025-AC18 | ColumnHeader.tsx |
+| FRONT-025 | FRONT-025-AC19 | ColumnHeader.tsx |
+| FRONT-025 | FRONT-025-AC20 | ColumnHeader.tsx and useDragAndDrop (column move controls) |
+| FRONT-025 | FRONT-025-AC21 | ColumnHeader.tsx and Page /boards/[id] (board view live region) |
 | FRONT-026 | FRONT-026-AC01 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC02 | AddCardForm.tsx |
 | FRONT-026 | FRONT-026-AC03 | AddCardForm.tsx |
@@ -1965,6 +1994,14 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-019 | FRONT-019-AC14 | useDragAndDrop (card rebalancing) |
 | FRONT-019 | FRONT-019-AC15 | useDragAndDrop (card rebalancing) |
 | FRONT-019 | FRONT-019-AC16 | useDragAndDrop (card rebalancing) |
+| FRONT-019 | FRONT-019-AC17 | CardItem and CardMoveMenu (Page /boards/[id]) |
+| FRONT-019 | FRONT-019-AC18 | CardMoveMenu (Page /boards/[id]) |
+| FRONT-019 | FRONT-019-AC19 | CardMoveMenu (Page /boards/[id]) |
+| FRONT-019 | FRONT-019-AC20 | useDragAndDrop (card move controls) |
+| FRONT-019 | FRONT-019-AC21 | useDragAndDrop (card move controls) |
+| FRONT-019 | FRONT-019-AC22 | useDragAndDrop (card move controls) |
+| FRONT-019 | FRONT-019-AC23 | Page /boards/[id] (board view live region) |
+| FRONT-019 | FRONT-019-AC24 | Page /boards/[id] (board view container) |
 | FRONT-020 | FRONT-020-AC01 | useErrorHandler |
 | FRONT-020 | FRONT-020-AC02 | useErrorHandler |
 | FRONT-020 | FRONT-020-AC03 | useErrorHandler |
@@ -1984,7 +2021,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-023 | FRONT-023-AC05 | Next.js proxy route handler |
 | FRONT-023 | FRONT-023-AC06 | Next.js proxy route handler |
 | FRONT-023 | FRONT-023-AC07 | Next.js proxy route handler (path allow-list) |
-| FRONT-023 | FRONT-023-AC08 | Next.js proxy route handler (origin check) |
+| FRONT-023 | FRONT-023-AC08 | Next.js proxy and session route handlers (trusted-origin check) |
 | FRONT-023 | FRONT-023-AC09 | Session module (server-only) |
 | FRONT-023 | FRONT-023-AC10 | Session logout route handler (Next.js server) |
 | FRONT-023 | FRONT-023-AC11 | Next.js proxy route handler (path allow-list) and session login route handler |
@@ -1992,6 +2029,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | FRONT-023 | FRONT-023-AC13 | Next.js proxy route handler |
 | FRONT-023 | FRONT-023-AC14 | Next.js proxy route handler (CSRF protection) |
 | FRONT-023 | FRONT-023-AC15 | Session module (server-only) and ESLint restricted-import rule |
+| FRONT-023 | FRONT-023-AC16 | Next.js proxy and session route handlers (request size limit) |
 | API-005 | API-005-AC01 | apiClient.ts and frontend `.env.example` |
 | API-005 | API-005-AC02 | apiClient.ts |
 | API-005 | API-005-AC03 | apiClient.ts |
@@ -2013,6 +2051,7 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-001 | TEST-001-AC03 | Backend test configuration (pytest fixtures) |
 | TEST-001 | TEST-001-AC04 | Backend pytest suite (response contract) |
 | TEST-001 | TEST-001-AC05 | Backend pytest suite (error envelope) |
+| TEST-001 | TEST-001-AC06 | Backend pytest suite (request size limit) |
 | TEST-002 | TEST-002-AC01 | Backend pytest suite (comments) |
 | TEST-002 | TEST-002-AC02 | Backend pytest suite (comments) |
 | TEST-002 | TEST-002-AC03 | Backend pytest suite (comments) |
@@ -2069,6 +2108,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-005 | TEST-005-AC09 | Frontend test suite (CardDetailModal and AddCardForm) |
 | TEST-005 | TEST-005-AC10 | Frontend test suite (NotificationBell and useNotifications) |
 | TEST-005 | TEST-005-AC11 | Frontend test suite (analytics panel) |
+| TEST-005 | TEST-005-AC12 | Frontend test suite (card and column move controls) |
+| TEST-005 | TEST-005-AC13 | Frontend test suite (trusted-origin check and request size limit) |
 | TEST-006 | TEST-006-AC01 | Playwright configuration |
 | TEST-006 | TEST-006-AC02 | Playwright test suite |
 | TEST-006 | TEST-006-AC03 | Playwright test suite |
@@ -2091,6 +2132,8 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | TEST-008 | TEST-008-AC08 | Playwright spec (Kanban journey) |
 | TEST-009 | TEST-009-AC01 | Playwright configuration (viewport projects) |
 | TEST-009 | TEST-009-AC02 | Playwright spec (responsive layout) |
+| TEST-009 | TEST-009-AC03 | Playwright spec (touch move controls at 360 px) |
+| TEST-009 | TEST-009-AC04 | Playwright spec (keyboard move controls) |
 | TEST-010 | TEST-010-AC01 | Backend pytest suite (column deletion) |
 | TEST-010 | TEST-010-AC02 | Backend pytest suite (foreign key preservation) |
 | TEST-010 | TEST-010-AC03 | Backend pytest suite (column deletion transaction) |
@@ -2133,6 +2176,9 @@ Every acceptance criterion maps to a planned Flask route, Next.js page or compon
 | NFR-007 | NFR-007-AC01 | Tailwind CSS layout (all pages) |
 | NFR-007 | NFR-007-AC02 | Page /boards/[id] |
 | NFR-007 | NFR-007-AC03 | Page /login |
+| NFR-007 | NFR-007-AC04 | Page /boards/[id] (move controls) |
+| NFR-007 | NFR-007-AC05 | Page /boards/[id] (move controls) |
+| NFR-007 | NFR-007-AC06 | Page /boards/[id] (move controls) |
 | NFR-008 | NFR-008-AC01 | Vercel deployment |
 | NFR-008 | NFR-008-AC02 | Render deployment (GET /api/health) |
 | NFR-008 | NFR-008-AC03 | Render environment configuration |
@@ -2417,11 +2463,11 @@ These decisions were approved by the human reviewer. They are requirements, not 
 | NOTIF | Notifications | 3 | 36 |
 | ANALYTICS | Board analytics | 6 | 53 |
 | USER | User profile | 2 | 9 |
-| FRONT | Frontend pages and components | 26 | 191 |
-| API | API client and response format | 7 | 37 |
-| TEST | Testing | 11 | 106 |
-| NFR | Non-functional requirements | 11 | 35 |
-| **Total** | | **93** | **710** |
+| FRONT | Frontend pages and components | 26 | 204 |
+| API | API client and response format | 7 | 38 |
+| TEST | Testing | 11 | 111 |
+| NFR | Non-functional requirements | 11 | 38 |
+| **Total** | | **93** | **732** |
 
 - Mandatory Flask API endpoints covered: 26 of 26.
 - Approved extension endpoints covered: 1 of 1 (`POST /api/boards/{id}/members`, BOARD-007, 10 acceptance criteria).
