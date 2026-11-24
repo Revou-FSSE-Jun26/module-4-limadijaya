@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton) and T1.03 (backend Python project) are complete and are the only completed implementation tasks. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton), T1.03 (backend Python project), and T1.04 (local test database and production-safety guard) are complete and are the only completed implementation tasks. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -100,7 +100,7 @@ Implementation details accepted by the human owner in the final documentation re
   - Done when: `requirements.txt` lists Flask, Flask-SQLAlchemy, Flask-Migrate, Flask-JWT-Extended, marshmallow, a PostgreSQL driver, and gunicorn (Flask-CORS is added in T3.05). `.env.example` lists `DATABASE_URL`, `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `FRONTEND_ORIGIN`, `LOG_LEVEL`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, and `TEST_DATABASE_URL`, each with a placeholder. The lifetime placeholder is not a recommended value (UD-01 is open).
   - Verify: `pip install -r requirements-dev.txt` succeeds in a clean virtual environment, and `grep` finds no real secret in the folder.
 
-- [ ] **T1.04 Provide a local PostgreSQL test database and the production-safety guard** — ACTIONABLE
+- [x] **T1.04 Provide a local PostgreSQL test database and the production-safety guard** — ACTIONABLE
   - Objective: document how a developer gets a local PostgreSQL database for tests, and make the test configuration refuse to run against the production database.
   - Files: M `README.md` (local setup section), C `backend/tests/conftest.py` (guard only, fixtures come in T2.09).
   - Reqs: TEST-001-AC03, NFR-002. Design: §4.1, §10 general rules. Guidelines: DB-02.
@@ -1427,7 +1427,7 @@ Results are measured on this file by script (task counts and dependency order) a
 ### Counts
 - Milestones: 16.
 - Tasks: 137 (Milestone 1: 7, 2: 11, 3: 7, 4: 7, 5: 7, 6: 7, 7: 9, 8: 6, 9: 9, 10: 12, 11: 12, 12: 7, 13: 7, 14: 12, 15: 9, 16: 8).
-- Status: 120 ACTIONABLE (including T1.01, T1.02, and T1.03, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 3 (T1.01, T1.02, T1.03). No other task is complete.
+- Status: 120 ACTIONABLE (including T1.01 to T1.04, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 4 (T1.01, T1.02, T1.03, T1.04). No other task is complete.
 
 ### Requirement gaps and contradictions noted while planning
 - **Closed: keyboard and touch move controls.** DA-18 was approved and `requirements.md` now has FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, and TEST-009-AC04. T12.04, T12.05, and T12.07 are actionable. T14.08 stays blocked by UD-16 and UD-22.
