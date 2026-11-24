@@ -1,18 +1,41 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { PASSWORD, logIn, registerUser, uniqueEmail } from "./helpers";
 
-test.describe("authentication journeys", () => {
-  test("registration page is reachable", async ({ page }) => {
-    await page.goto("/register");
-    await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+test.describe("authentication flows", () => {
+  let email: string;
+
+  test.beforeAll(async ({ request, baseURL }) => {
+    email = uniqueEmail("auth");
+    await registerUser(request, baseURL as string, "Auth Tester", email);
   });
 
-  test("login page is reachable", async ({ page }) => {
+  test("successful login redirects to the dashboard", async ({ page }) => {
+    await logIn(page, email);
+    await expect(page).toHaveURL("/");
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  });
+
+  test("invalid credentials show an error and stay on /login", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(`${PASSWORD}-wrong`);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Invalid email or password." })).toBeVisible();
+    await expect(page).toHaveURL(/\/login$/);
   });
 
-  test("unauthenticated dashboard offers authentication", async ({ page }) => {
+  test("an unauthenticated visitor is redirected to /login", async ({ page }) => {
+    for (const path of ["/", "/my-tasks", "/profile"]) {
+      await page.goto(path);
+      await expect(page).toHaveURL(/\/login$/);
+    }
+  });
+
+  test("logging out redirects to /login and protects the pages again", async ({ page }) => {
+    await logIn(page, email);
+    await page.getByRole("button", { name: "Log out" }).click();
+    await expect(page).toHaveURL(/\/login$/);
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Register" })).toBeVisible();
+    await expect(page).toHaveURL(/\/login$/);
   });
 });

@@ -43,7 +43,7 @@ const eslintConfig = [
   {
     // BaseButton is the only component allowed to render the <button> element (FE-11).
     // The waitForTimeout rule stays active here.
-    files: ["src/components/ui/BaseButton.tsx"],
+    files: ["src/components/shared/BaseButton.tsx"],
     rules: {
       "no-restricted-syntax": [
         "error",
