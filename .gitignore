@@ -1,0 +1,30 @@
+# Environment files (real values are never committed; placeholders live in *.example)
+.env*
+!*.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Node and Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+coverage/
+
+# Playwright output
+playwright-report/
+test-results/
+
+# OS files
+.DS_Store
+Thumbs.db

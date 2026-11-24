@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. No implementation task is complete. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton) is complete and is the only completed implementation task. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -83,8 +83,8 @@ Implementation details accepted by the human owner in the final documentation re
   - Depends: none. Every task that uses a design assumption lists this task in its `Depends` line.
   - Done when (met): each of the 19 rows of the approval record has the exact decision, the approver name (Limadijaya Suhendra), and the date (2026-11-24), and no row is empty.
   - Verify: the record lists all 19 IDs with approver and date, and it agrees with `design.md` Section 12.3.
-  - Completion note: the checkbox records that the approvals exist. It does not mean that any verification obligation (V-01 to V-10) has passed, and no implementation task is complete.
-- [ ] **T1.02 Create the repository skeleton** — ACTIONABLE
+  - Completion note: the checkbox records that the approvals exist. It does not mean that any verification obligation (V-01 to V-10) has passed. It does not mark any implementation task complete.
+- [x] **T1.02 Create the repository skeleton** — ACTIONABLE
   - Objective: create the `backend/` and `frontend/` folders and the root files from the approved layout.
   - Files: C `README.md` (stub), C `.gitignore`, C `backend/`, C `frontend/`, C empty `evidence/ai-reviews/`.
   - Reqs: NFR-010, NFR-011. Design: §2.1, §2.3. Guidelines: BE-01, FE-19.
@@ -1427,7 +1427,7 @@ Results are measured on this file by script (task counts and dependency order) a
 ### Counts
 - Milestones: 16.
 - Tasks: 137 (Milestone 1: 7, 2: 11, 3: 7, 4: 7, 5: 7, 6: 7, 7: 9, 8: 6, 9: 9, 10: 12, 11: 12, 12: 7, 13: 7, 14: 12, 15: 9, 16: 8).
-- Status: 120 ACTIONABLE (including T1.01, which is complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 1 (T1.01). No implementation task is complete.
+- Status: 120 ACTIONABLE (including T1.01 and T1.02, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 2 (T1.01, T1.02). No other task is complete.
 
 ### Requirement gaps and contradictions noted while planning
 - **Closed: keyboard and touch move controls.** DA-18 was approved and `requirements.md` now has FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, and TEST-009-AC04. T12.04, T12.05, and T12.07 are actionable. T14.08 stays blocked by UD-16 and UD-22.
