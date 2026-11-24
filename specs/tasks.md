@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton), T1.03 (backend Python project), and T1.04 (local test database and production-safety guard) are complete and are the only completed implementation tasks. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. Milestone 1 is complete: T1.02 to T1.07 (repository skeleton, backend Python project, local test database and safety guard, frontend scaffold, frontend tooling, evidence scaffolding) are the only completed implementation tasks. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -108,7 +108,7 @@ Implementation details accepted by the human owner in the final documentation re
   - Done when: the README explains the two variables `DATABASE_URL` and `TEST_DATABASE_URL`. The guard fails when the two are equal. The set of environments is **not** defined here (UD-16).
   - Verify: a unit test sets both variables to the same value and asserts that start-up fails with a message.
 
-- [ ] **T1.05 Scaffold the Next.js frontend** — ACTIONABLE (approved: DA-04)
+- [x] **T1.05 Scaffold the Next.js frontend** — ACTIONABLE (approved: DA-04)
   - Objective: create the Next.js App Router project with TypeScript strict mode and Tailwind CSS, and `frontend/.env.example`.
   - Files: C `frontend/package.json`, `tsconfig.json`, `tailwind.config.ts`, `next.config.ts`, `src/app/layout.tsx` (placeholder), `src/app/globals.css`, `frontend/.env.example`.
   - Reqs: NFR-010-AC02, NFR-007. Design: §2.1, §7.13, §11.1. Guidelines: FE-09, FE-10, FE-19.
@@ -116,7 +116,7 @@ Implementation details accepted by the human owner in the final documentation re
   - Done when: `strict` is on and `globals.css` has only Tailwind directives. `.env.example` lists `API_BASE_URL` and `NEXT_PUBLIC_API_BASE_URL` with placeholder URLs. `APP_ORIGIN` is listed with a placeholder: it holds the explicitly trusted origins (DA-04, approved), and a preview origin is trusted only when it is listed.
   - Verify: `npm run build` and `npm run dev` start, and the placeholder page renders.
 
-- [ ] **T1.06 Configure frontend test and lint tooling** — ACTIONABLE
+- [x] **T1.06 Configure frontend test and lint tooling** — ACTIONABLE
   - Objective: configure Vitest with a DOM environment and React Testing Library, ESLint rules that enforce the guidelines, and a Playwright skeleton.
   - Files: C `frontend/vitest.config.ts`, `frontend/tests/setup.ts`, `frontend/e2e/playwright.config.ts`, M `frontend/package.json`, M ESLint config.
   - Reqs: TEST-005, TEST-006. Design: §10.2, §10.3. Guidelines: FE-09, FE-10, FE-11, FE-20, FE-21.
@@ -124,7 +124,7 @@ Implementation details accepted by the human owner in the final documentation re
   - Done when: lint fails on `style=` props, raw `<button>`, `any`, `waitForTimeout`, and any import of a drag-and-drop or sortable library (guideline FE-14, which forbids dnd-kit and similar libraries). Playwright reads its base URL from an environment variable and has no fixed environment (UD-16 stays open).
   - Verify: a sample violating file makes `npm run lint` fail, and `npm test` runs one trivial test.
 
-- [ ] **T1.07 Create the evidence and changelog scaffolding** — ACTIONABLE
+- [x] **T1.07 Create the evidence and changelog scaffolding** — ACTIONABLE
   - Objective: create the files that NFR-011 requires, as templates.
   - Files: C `specs/CHANGELOG.md` (if not created in T1.01), C `evidence/ai-reviews/violation-report.md`, C `evidence/ai-reviews/guidelines-comparison.md`.
   - Reqs: NFR-011-AC01, AC02, AC04, AC07. Design: §2.1.
@@ -1427,7 +1427,7 @@ Results are measured on this file by script (task counts and dependency order) a
 ### Counts
 - Milestones: 16.
 - Tasks: 137 (Milestone 1: 7, 2: 11, 3: 7, 4: 7, 5: 7, 6: 7, 7: 9, 8: 6, 9: 9, 10: 12, 11: 12, 12: 7, 13: 7, 14: 12, 15: 9, 16: 8).
-- Status: 120 ACTIONABLE (including T1.01 to T1.04, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 4 (T1.01, T1.02, T1.03, T1.04). No other task is complete.
+- Status: 120 ACTIONABLE (including T1.01 to T1.07, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 7 (T1.01 to T1.07). No other task is complete.
 
 ### Requirement gaps and contradictions noted while planning
 - **Closed: keyboard and touch move controls.** DA-18 was approved and `requirements.md` now has FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, and TEST-009-AC04. T12.04, T12.05, and T12.07 are actionable. T14.08 stays blocked by UD-16 and UD-22.
