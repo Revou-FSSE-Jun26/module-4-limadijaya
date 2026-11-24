@@ -225,7 +225,7 @@ module-4-limadijaya/
     ├── tsconfig.json                      # strict
     ├── tailwind.config.ts
     ├── next.config.ts
-    ├── middleware.ts                      # redirect when cookie is missing or expired
+    ├── src/proxy.ts                       # Next.js 16 name for middleware: redirect when cookie is missing or expired
     ├── .env.example                       # NFR-010-AC02
     ├── src/
     │   ├── app/
@@ -249,7 +249,7 @@ module-4-limadijaya/
     │   │       ├── session/expire/route.ts
     │   │       └── [...path]/route.ts     # same-origin proxy to Flask /api/*
     │   ├── components/
-    │   │   ├── ui/            {BaseButton, BaseBadge, BaseModal}.tsx
+    │   │   ├── shared/        {BaseButton, BaseBadge, BaseModal}.tsx
     │   │   ├── layout/        {AppHeader, Providers}.tsx
     │   │   ├── auth/          {LoginForm, RegisterForm}.tsx
     │   │   ├── boards/        {BoardCard, CreateBoardForm, BoardView, ColumnHeader, AddColumnForm,

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. Milestone 1 is complete: T1.02 to T1.07 (repository skeleton, backend Python project, local test database and safety guard, frontend scaffold, frontend tooling, evidence scaffolding) are the only completed implementation tasks. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open, but Kiro took working decisions for UD-01, 02, 09, 15, 16, 17, 21, 22 on the owner's delegation (see `CHANGELOG.md`, pending owner confirmation). The ten verification obligations (V-01 to V-10) are outstanding. Milestones 1 to 13 are implemented and tested locally. Not done: concurrency tests (T6.06, T7.08), SQL-capture tests, T4.06, T4.07, T8.05, T9.04, T9.09, T10.11, T11.11, T11.12, T12.06, T12.07, T13.06, T13.07, T14.01 to T14.03, T14.08 to T14.12, and all of Milestones 15 and 16 that need a deployment. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -140,14 +140,14 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
 
 **Note on the application factory.** Flask-Migrate needs `create_app`, so T2.01 builds the factory and configuration together with the extensions. Milestone 3 builds the rest of the backend infrastructure on top of it. T2.09 builds the test fixtures before the migration tests (T2.10, T2.11).
 
-- [ ] **T2.01 Add extensions, clock, model base helpers, application factory, and configuration** — ACTIONABLE (approved: DA-07, DA-16)
+- [x] **T2.01 Add extensions, clock, model base helpers, application factory, and configuration** — ACTIONABLE (approved: DA-07, DA-16)
   - Objective: create the `db`, `migrate`, `jwt` extension objects, an injectable UTC clock, helpers for UUID primary keys and timezone-aware timestamps, `create_app(config=None)`, and a config that reads the environment and fails fast. Flask-Migrate needs the factory, so it is built first.
   - Files: C `backend/app/extensions.py`, `backend/app/clock.py`, `backend/app/models/__init__.py`, `backend/app/__init__.py`, `backend/app/config.py`.
   - Reqs: CARD-001-AC01, ANALYTICS-005-AC04, ANALYTICS-006-AC11, NFR-002, NFR-010-AC03, AUTH-003-AC05, API-004-AC03. Design: §3.2, §4.1. Guidelines: DB-03, DB-04, BE-01, DB-01.
   - Depends: T1.01 (approval record), T1.03.
   - Done when: the clock returns timezone-aware UTC and can be replaced in tests, a primary key default generates a `uuid.uuid4` value on the server side, a missing required variable stops start-up and names the variable, and `JWT_ACCESS_TOKEN_EXPIRES_SECONDS` is required with **no default** (UD-01 stays open). `MAX_CONTENT_LENGTH` is 1,048,576 bytes (DA-07), and the engine uses `pool_pre_ping` with the small configurable pool variables `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` (DA-16). Tests call `create_app(config)`.
   - Verify: unit tests assert the clock is timezone-aware and replaceable, tests unset each required variable and assert the message, and a grep finds no literal secret.
-- [ ] **T2.02 Create `User`, `Board`, and `BoardMembership` models** — ACTIONABLE (approved: DA-02, DA-06)
+- [x] **T2.02 Create `User`, `Board`, and `BoardMembership` models** — ACTIONABLE (approved: DA-02, DA-06)
   - Objective: define the three models with UUID keys, timestamps, unique email, role CHECK, and a unique (`board_id`, `user_id`) constraint.
   - Files: C `backend/app/models/user.py`, `board.py`, `board_membership.py`.
   - Reqs: AUTH-001, BOARD-001, BOARD-007-AC04, UD-04. Design: §3.3. Guidelines: DB-03, DB-07.
@@ -155,7 +155,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: `role` allows only `administrator` and `member`. Email lowercasing is applied by the service, not by the model (DA-06). No `deleted_at` exists on these models (DB-06).
   - Verify: model tests insert a duplicate membership and a duplicate email and expect an integrity error, and insert an invalid role and expect a CHECK failure.
 
-- [ ] **T2.03 Create the `BoardColumn` model** — ACTIONABLE (approved: DA-02)
+- [x] **T2.03 Create the `BoardColumn` model** — ACTIONABLE (approved: DA-02)
   - Objective: define the model with `position` as `db.Column(db.Float, nullable=False)`, `is_done` (Boolean, not null, default false), and a nullable `deleted_at`.
   - Files: C `backend/app/models/board_column.py`.
   - Reqs: COLUMN-004-AC05, COLUMN-005. Design: §3.3, §3.7. Guidelines: DB-05, DB-06, DB-07.
@@ -163,7 +163,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: introspection shows a Float `position`, a Boolean non-null `is_done` with default false, and a timezone-aware nullable `deleted_at`. There is no unique index on `position`.
   - Verify: model tests for COLUMN-005-AC01 and AC04.
 
-- [ ] **T2.04 Create the `Card` model** — ACTIONABLE (approved: DA-02)
+- [x] **T2.04 Create the `Card` model** — ACTIONABLE (approved: DA-02)
   - Objective: define the model with `column_id` (non-null FK), `title`, `position` Float, nullable `assignee_id`, nullable `completed_at`, nullable `deleted_at`.
   - Files: C `backend/app/models/card.py`.
   - Reqs: CARD-001 (AC01 to AC11). Design: §3.3. Guidelines: DB-03, DB-05, DB-06, DB-07. UD-07 is open, so there are no description or due-date fields.
@@ -171,7 +171,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: introspection confirms the CARD-001 acceptance criteria. No field beyond those listed exists.
   - Verify: model tests for CARD-001-AC01, AC04, AC05, AC07, AC08.
 
-- [ ] **T2.05 Create the `Comment` model** — ACTIONABLE (approved: DA-02)
+- [x] **T2.05 Create the `Comment` model** — ACTIONABLE (approved: DA-02)
   - Objective: define the model with `card_id`, `author_id`, `content`, timestamps. Comments are hard-deleted.
   - Files: C `backend/app/models/comment.py`.
   - Reqs: COMMENT-001, COMMENT-004-AC06. Design: §3.3. Guidelines: DB-06.
@@ -179,7 +179,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: the model has no `deleted_at`.
   - Verify: a model test deletes a comment and the row is gone.
 
-- [ ] **T2.06 Create the `Notification` model** — ACTIONABLE (approved: DA-02, DA-13)
+- [x] **T2.06 Create the `Notification` model** — ACTIONABLE (approved: DA-02, DA-13)
   - Objective: define the model with `user_id`, `actor_id`, `board_id`, `card_id`, `type` CHECK (`card_assigned`, `comment_added`), `message`, Boolean `is_read` (not null, default false), `created_at`.
   - Files: C `backend/app/models/notification.py`.
   - Reqs: NOTIF-001-AC06, NOTIF-003, UD-08. Design: §3.3. Guidelines: DB-10.
@@ -187,7 +187,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: there is no `read_at` column and no unique constraint on (`user_id`, `card_id`, `type`). The pagination shape is not assumed (UD-09).
   - Verify: model tests insert two identical-looking notifications and both persist, and a new row has `is_read` false.
 
-- [ ] **T2.07 Create the `ActivityEvent` model** — ACTIONABLE (approved: DA-02, DA-14)
+- [x] **T2.07 Create the `ActivityEvent` model** — ACTIONABLE (approved: DA-02, DA-14)
   - Objective: define the append-only model with `type` CHECK limited to `card_created`, `card_moved`, `comment_created`, `board_id`, `actor_id`, `card_id`, nullable `comment_id` without a foreign key, nullable `from_column_id` and `to_column_id`, `created_at`, and a CHECK that a `card_moved` row has both columns.
   - Files: C `backend/app/models/activity_event.py`.
   - Reqs: ANALYTICS-006 (AC05, AC06), UD-13, A-13, A-14. Design: §3.3, §3.6. Guidelines: DB-09, BE-14.
@@ -195,7 +195,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: the CHECK rejects any other event type, in particular `card_assigned`.
   - Verify: model tests that an invalid type and a `card_moved` row without columns fail.
 
-- [ ] **T2.08 Write the initial Flask-Migrate migration** — ACTIONABLE (approved: DA-02, DA-14, DA-17)
+- [x] **T2.08 Write the initial Flask-Migrate migration** — ACTIONABLE (approved: DA-02, DA-14, DA-17)
   - Objective: create all eight tables with constraints, foreign keys, the partial indexes of the design, and `ON DELETE CASCADE` on the board-owned foreign keys.
   - Files: C `backend/migrations/` (initial revision), `env.py`.
   - Reqs: NFR-009, COLUMN-005-AC03, AC05, CARD-001-AC06, AC09, BOARD-005-AC08. Design: §3.3 to §3.8. Guidelines: DB-08, DB-09, DB-11, DB-15.
@@ -203,7 +203,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: `flask db upgrade` on an empty database reaches head. Only `board_id` carries a cascade on `activity_events` and `notifications` (no cascade from card, column, or comment). No table other than the eight exists. A revision enables Row Level Security on the eight application tables with no policies for browser-facing roles (DA-17, verification V-03).
   - Verify: T2.10.
 
-- [ ] **T2.09 Test fixtures and helpers** — ACTIONABLE
+- [x] **T2.09 Test fixtures and helpers** — ACTIONABLE
   - Objective: build the pytest fixtures: app, client, PostgreSQL test database created by `flask db upgrade`, per-test cleanup, fixed clock, factories, two-connection helper, SQL-capture helper, and a test-only lock-pause hook.
   - Files: M `backend/tests/conftest.py`, C `backend/tests/factories.py`, C `backend/tests/helpers/`.
   - Reqs: TEST-001-AC03, TEST-006-AC07, ANALYTICS-005-AC04. Design: §10 general rules. Guidelines: BE-20, DB-02.
@@ -211,7 +211,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: tests never touch production, never depend on the real date, and create their own data. A hook lets a concurrency test pause a transaction after it takes a lock.
   - Verify: a smoke test creates a user and a board through factories and reads them back on a second connection.
 
-- [ ] **T2.10 Migration tests** — ACTIONABLE (approved: DA-17)
+- [x] **T2.10 Migration tests** — ACTIONABLE (approved: DA-17)
   - Objective: automate the migration acceptance criteria.
   - Files: C `backend/tests/migrations/test_migrations.py`.
   - Reqs: NFR-009-AC01, AC02, COLUMN-005-AC03, AC05, CARD-001-AC06, AC09. Design: §10.1 (Migrations). Guidelines: DB-15, DB-16.
@@ -219,7 +219,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
   - Done when: tests run `upgrade` on an empty database, assert that autogenerate reports no differences, run an `upgrade`, `downgrade`, `upgrade` cycle, assert the table list is exactly the eight tables, assert that RLS is enabled on those eight tables and that no policy exists (V-03), and check defaults for pre-existing rows.
   - Verify: `pytest backend/tests/migrations` passes against `TEST_DATABASE_URL`.
 
-- [ ] **T2.11 Board hard-delete cascade proof** — ACTIONABLE (approved: DA-14)
+- [x] **T2.11 Board hard-delete cascade proof** — ACTIONABLE (approved: DA-14)
   - Objective: run the mandatory PostgreSQL integration test (V-04) that proves that deleting a fully populated board with the approved `ON DELETE CASCADE` strategy (DA-14) leaves no dependent row.
   - Files: C `backend/tests/migrations/test_board_delete_cascade.py`.
   - Reqs: BOARD-005-AC04, AC05, AC07, AC08, TEST-010-AC08. Design: §3.6, §12.6 (R-05). Guidelines: DB-08, DB-09.
@@ -233,7 +233,7 @@ All tasks in this milestone follow `guidelines/database.md`. Table names are an 
 
 The application factory and configuration were built in T2.01 and the fixtures in T2.09. This milestone adds the response helpers, JWT callbacks, validation primitives, access and locking helpers, health route, Blueprint skeleton, and logging.
 
-- [ ] **T3.01 Response helpers and central error handlers** — ACTIONABLE (approved: DA-01, DA-07)
+- [x] **T3.01 Response helpers and central error handlers** — ACTIONABLE (approved: DA-01, DA-07)
   - Objective: implement `ok(data, status)` and `fail(message, status)` and handlers for validation errors, 404, 405, 415, invalid JSON, integrity errors, and the generic 500.
   - Files: C `backend/app/responses.py`, `backend/app/errors.py`.
   - Reqs: API-001, API-002 (AC01 to AC06), TEST-001-AC05, TEST-001-AC06, UD-19, Section 2.3 (413). Design: §4.4, §4.5. Guidelines: BE-04, BE-05.
@@ -241,7 +241,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: every error body is `{"error": "<non-empty string>"}` with no `data`, every body has `Content-Type: application/json`, and the 500 text is the same for every exception and contains no stack, path, SQL, token, or class name. The wording is approved (DA-01). A body larger than 1,048,576 bytes returns 413 with the string envelope and the text `Request body is too large.` (DA-07), tested with a 1,048,576 byte body (not rejected for its size) and a 1,048,577 byte body (rejected), as verification V-06.
   - Verify: contract tests for 400, 401, 403, 404, 405, 409, 413, 415, 500, a forced-exception test, and the 1,048,576 and 1,048,577 byte body test (TEST-001-AC06).
 
-- [ ] **T3.02 JWT callbacks that return 401** — ACTIONABLE
+- [x] **T3.02 JWT callbacks that return 401** — ACTIONABLE
   - Objective: configure Flask-JWT-Extended with header-only token location and callbacks so that every token failure returns 401 with the string envelope.
   - Files: M `backend/app/errors.py`, M `backend/app/__init__.py`.
   - Reqs: AUTH-003 (AC02 to AC04, AC06), AUTH-004. Design: §4.6, §12.6 (R-08). Guidelines: BE-07.
@@ -249,7 +249,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: no token, a malformed token, a wrong-key token, an expired token, and a cookie-only token all return 401, never 422.
   - Verify: parametrized tests against a throwaway protected route.
 
-- [ ] **T3.03 Strict validation primitives** — ACTIONABLE
+- [x] **T3.03 Strict validation primitives** — ACTIONABLE
   - Objective: create a base Marshmallow schema with `unknown = RAISE`, a `StrictNumber` field, a strict UUID field, and a JSON parser option that rejects `NaN` and `Infinity`.
   - Files: C `backend/app/schemas_common.py`.
   - Reqs: A-06, CARD-006-AC04, COLUMN-004-AC02, NFR-003. Design: §4.7. Guidelines: BE-06.
@@ -257,7 +257,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: `StrictNumber` rejects `bool`, `str`, `None`, `NaN`, `Infinity`, `-Infinity`, `1e400`, `1e-400`, zero, and negatives, accepts positive `int` and `float`, and returns a `float`. Text fields trim and reject empty values (DA-07, approved).
   - Verify: parametrized unit tests for every rejected and accepted case.
 
-- [ ] **T3.04 Access, query, and locking helpers** — ACTIONABLE (approved: DA-11)
+- [x] **T3.04 Access, query, and locking helpers** — ACTIONABLE (approved: DA-11)
   - Objective: implement membership, admin, and ownership helpers, the live-row query helpers, and the lock helpers with the fixed lock order.
   - Files: C `backend/app/access.py`, `backend/app/queries.py`, `backend/app/locking.py`.
   - Reqs: BOARD-006, UD-05, Section 2.4, UD-18, UD-20, UD-06. Design: §4.8, §4.10, §8.4. Guidelines: BE-08, BE-09, BE-10, BE-11, BE-17, DB-14.
@@ -265,7 +265,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: every "not found" path raises the same `NotFoundError`, helpers read role from the database (never from a token), and `queries.py` is the only way services read columns and cards. The required locks are board, destination column, and card for assignment. Extra locks (DA-11) are added only in the tasks that need them.
   - Verify: unit tests for each helper, and a grep test that fails when a service queries `BoardColumn` or `Card` without a live helper.
 
-- [ ] **T3.05 Health route and CORS** — ACTIONABLE (approved: DA-12)
+- [x] **T3.05 Health route and CORS** — ACTIONABLE (approved: DA-12)
   - Objective: add `GET /api/health` as a plain app route and apply CORS to that route only.
   - Files: C `backend/app/health.py`, M `backend/app/__init__.py`, M `backend/requirements.txt`.
   - Reqs: API-003, API-004 (AC01 to AC05), NFR-008-AC02. Design: §4.13. Guidelines: BE-19.
@@ -273,7 +273,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the body is exactly `{"data": {"status": "ok"}}`, no database query runs, a preflight from `FRONTEND_ORIGIN` receives that origin, other origins receive no `Access-Control-Allow-Origin`, `Authorization` is not allowed, and no response has `Access-Control-Allow-Credentials: true`. Flask-CORS, limited to this route, is approved (DA-12).
   - Verify: tests for API-003-AC01, AC03 (SQL capture shows no query) and API-004-AC01 to AC05.
 
-- [ ] **T3.06 Register the eight Blueprints and the endpoint-coverage test** — ACTIONABLE
+- [x] **T3.06 Register the eight Blueprints and the endpoint-coverage test** — ACTIONABLE
   - Objective: create the eight empty Blueprint packages, register them under `/api`, and add a test that lists the 27 expected routes.
   - Files: C `backend/app/blueprints/{auth,users,boards,columns,cards,comments,notifications,analytics}/{__init__,routes,service,schema}.py`, M `backend/app/__init__.py`, C `backend/tests/api/test_endpoint_coverage.py`.
   - Reqs: TEST-001-AC02, AUTH-004-AC01, BOARD-007-AC10, AUTH-002-AC05, COLUMN-003-AC12. Design: §4.2, §5.12. Guidelines: BE-02, BE-03, BE-21.
@@ -281,7 +281,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: exactly eight Blueprints are registered, and `/api/health` is not one of them. The coverage test starts as expected-to-fail for routes not yet built and ends fully green in T9.09. The test also asserts there is no refresh route, no restore route, and exactly one members route.
   - Verify: `pytest backend/tests/api/test_endpoint_coverage.py` runs and reports the missing routes.
 
-- [ ] **T3.07 Logging and request id** — ACTIONABLE
+- [x] **T3.07 Logging and request id** — ACTIONABLE
   - Objective: add single-line logs with request id, method, path, status, and duration, with no sensitive data.
   - Files: M `backend/app/__init__.py`, C `backend/app/logging_config.py`.
   - Reqs: API-002-AC05, NFR-001, NFR-002. Design: §4.12, §11.7.
@@ -293,7 +293,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 4. Registration, login, JWT authentication and authorization
 
-- [ ] **T4.01 Password hashing module** — ACTIONABLE (approved: DA-05)
+- [x] **T4.01 Password hashing module** — ACTIONABLE (approved: DA-05)
   - Objective: implement `hash_password` and `verify_password`, plus a dummy-hash check for unknown emails.
   - Files: C `backend/app/security.py`.
   - Reqs: NFR-001. Design: §6.2. Guidelines: BE-18.
@@ -301,7 +301,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the stored value is not the plain password, the algorithm lives only in this module, and no hash is ever returned or logged. The scrypt parameters are explicit (`scrypt:32768:8:1` as a provisional development configuration accepted by the human owner, DA-05) and set in one place, a plaintext password is never logged, and the final parameters are fixed only after the Render security, latency, and memory benchmark (V-01, done in T15.05 and required before production deployment, not yet complete). The password policy is not enforced here (UD-21).
   - Verify: unit tests for hash differs from input, verify succeeds and fails correctly, and the dummy path runs for an unknown email.
 
-- [ ] **T4.02 `POST /api/auth/register`** — ACTIONABLE (approved: DA-06, DA-07)
+- [x] **T4.02 `POST /api/auth/register`** — ACTIONABLE (approved: DA-06, DA-07)
   - Objective: create a user from `name`, `email`, `password` and return 201 with `id`, `name`, `email`.
   - Files: M `backend/app/blueprints/auth/{routes,service,schema}.py`.
   - Reqs: AUTH-001-AC01 to AC05, A-04. Design: §5.3, §6.1. Guidelines: BE-03, BE-06, BE-18.
@@ -309,7 +309,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: empty or missing fields and an invalid email return 400, a duplicate email returns 409 (also on a lost race through the unique constraint), and the response has no password or hash. **Only "present and non-empty" is enforced for the password, because UD-21 is open.** The email is trimmed and lowercased before every lookup and write (DA-06, approved).
   - Verify: tests for AUTH-001-AC01 to AC05 and a two-thread duplicate registration test.
 
-- [ ] **T4.03 `POST /api/auth/login`** — ACTIONABLE
+- [x] **T4.03 `POST /api/auth/login`** — ACTIONABLE
   - Objective: verify credentials and return 200 with exactly `{"data": {"access_token": "<jwt>"}}`.
   - Files: M `backend/app/blueprints/auth/{routes,service,schema}.py`.
   - Reqs: AUTH-002-AC01 to AC05, AUTH-003-AC01, UD-19. Design: §5.3, §6.3. Guidelines: BE-07, BE-18.
@@ -317,7 +317,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a wrong password and an unknown email return 401 with the identical body, a missing field returns 400, the token has `sub` and `exp`, and `data` has no other key. The lifetime is read from the required variable (UD-01 stays open).
   - Verify: tests for AUTH-002-AC01 to AC05 and AUTH-003-AC01.
 
-- [ ] **T4.04 Protected-endpoint behavior tests** — ACTIONABLE
+- [x] **T4.04 Protected-endpoint behavior tests** — ACTIONABLE
   - Objective: automate the 401 behavior for any protected route.
   - Files: C `backend/tests/api/test_auth_protection.py`.
   - Reqs: AUTH-003-AC02 to AC06, AUTH-004-AC01, AC02. Design: §4.6. Guidelines: BE-07.
@@ -325,7 +325,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: tests produce an expired token with a negative lifetime, a wrong-key token, a malformed token, and a cookie-only token. The test iterates the route list so new routes are covered automatically.
   - Verify: `pytest backend/tests/api/test_auth_protection.py` passes. The test grows as routes are added.
 
-- [ ] **T4.05 `GET` and `PATCH /api/users/me`** — ACTIONABLE (approved: DA-06, DA-09)
+- [x] **T4.05 `GET` and `PATCH /api/users/me`** — ACTIONABLE (approved: DA-06, DA-09)
   - Objective: return and update the current user's profile (`name`, `email` only).
   - Files: M `backend/app/blueprints/users/{routes,service,schema}.py`.
   - Reqs: USER-001, USER-002 (AC01 to AC06). Design: §5.4. Guidelines: BE-06.
@@ -353,7 +353,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 5. Board and membership APIs
 
-- [ ] **T5.01 `POST /api/boards`** — ACTIONABLE (approved: DA-03)
+- [x] **T5.01 `POST /api/boards`** — ACTIONABLE (approved: DA-03)
   - Objective: create a board and the creator's `administrator` membership in one transaction.
   - Files: M `backend/app/blueprints/boards/{routes,service,schema}.py`.
   - Reqs: BOARD-001-AC01 to AC04, UD-04. Design: §5.5. Guidelines: BE-16.
@@ -361,7 +361,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: 201 returns `id` and `name` (and the timestamps approved in DA-03), a missing or empty `name` returns 400, and a failure after the board insert leaves neither row.
   - Verify: tests for BOARD-001-AC01 to AC03 and a forced-failure rollback test.
 
-- [ ] **T5.02 `GET /api/boards`** — ACTIONABLE (approved: DA-03, DA-10)
+- [x] **T5.02 `GET /api/boards`** — ACTIONABLE (approved: DA-03, DA-10)
   - Objective: list only the boards where the caller is a member.
   - Files: M `backend/app/blueprints/boards/*`.
   - Reqs: BOARD-002, API-001-AC06. Design: §5.5.
@@ -369,7 +369,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: boards of other users are absent, a user with no boards receives `[]`, and the order is the approved deterministic order (DA-10).
   - Verify: tests for BOARD-002-AC01 to AC03.
 
-- [ ] **T5.03 `GET /api/boards/{id}`** — ACTIONABLE (approved: DA-03)
+- [x] **T5.03 `GET /api/boards/{id}`** — ACTIONABLE (approved: DA-03)
   - Objective: return the board with `role`, `members`, columns by ascending `order`, and each column's live cards by ascending `order`.
   - Files: M `backend/app/blueprints/boards/*`.
   - Reqs: BOARD-003-AC01 to AC12, A-02, A-14, UD-08, UD-18. Design: §5.2, §5.5. Guidelines: BE-11, DB-12.
@@ -377,7 +377,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: soft-deleted columns and cards are absent, `members` entries have exactly `id` and `name` ordered by `name` then `id`, a non-member and a missing board return an identical 404, and the query count is fixed. The cards are nested under each column and the extra card fields are those approved in DA-03.
   - Verify: tests for BOARD-003-AC01 to AC12 and a SQL-capture statement-count test.
 
-- [ ] **T5.04 `PATCH /api/boards/{id}`** — ACTIONABLE
+- [x] **T5.04 `PATCH /api/boards/{id}`** — ACTIONABLE
   - Objective: rename a board, administrator only.
   - Files: M `backend/app/blueprints/boards/*`.
   - Reqs: BOARD-004-AC01 to AC04, UD-05. Design: §5.5, §4.8. Guidelines: BE-09, BE-10.
@@ -385,7 +385,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a non-member gets 404, a member gets 403 even with an empty or invalid body, an administrator with an empty `name` gets 400, and the stored name is unchanged on every rejection.
   - Verify: tests for BOARD-004-AC01 to AC04 and a matrix entry in T4.06.
 
-- [ ] **T5.05 `DELETE /api/boards/{id}`** — CONDITIONAL (V-04; approved: DA-14, DA-11)
+- [x] **T5.05 `DELETE /api/boards/{id}`** — CONDITIONAL (V-04; approved: DA-14, DA-11)
   - Objective: hard-delete a board and everything that belongs to it, administrator only, in one transaction with the board row locked first.
   - Files: M `backend/app/blueprints/boards/*`.
   - Reqs: BOARD-005-AC01 to AC08, UD-18, UD-19, NOTIF-003-AC18, ANALYTICS-006-AC10. Design: §3.6, §5.5, §8.4. Guidelines: DB-08, BE-16.
@@ -394,7 +394,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the response is `{"data": {"id": "<id>"}}`, the approved `ON DELETE CASCADE` strategy is used (DA-14), and the PostgreSQL integration test of T2.11 has passed, a forced failure leaves everything unchanged, and other boards and `users` are untouched.
   - Verify: tests for BOARD-005-AC01 to AC07 on a database built by `flask db upgrade`.
 
-- [ ] **T5.06 `POST /api/boards/{id}/members` (approved extension)** — ACTIONABLE (approved: DA-06)
+- [x] **T5.06 `POST /api/boards/{id}/members` (approved extension)** — ACTIONABLE (approved: DA-06)
   - Objective: add a registered user to the board as a `member` by email, administrator only.
   - Files: M `backend/app/blueprints/boards/*`.
   - Reqs: BOARD-007-AC01 to AC10, UD-24, A-13, A-14. Design: §5.5. Guidelines: BE-10.
@@ -402,7 +402,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the response is 201 with `id`, `name`, `email`, a duplicate returns 409 (including a lost race), an unknown email returns 404, any key other than `email` returns 400, and a member gets 403 before validation. The route is the only one under `/api/boards/{id}/members` and accepts only POST.
   - Verify: tests for BOARD-007-AC01 to AC10.
 
-- [ ] **T5.07 Board permission and isolation tests** — ACTIONABLE
+- [x] **T5.07 Board permission and isolation tests** — ACTIONABLE
   - Objective: complete the matrix entries and cross-board isolation tests for the `boards` Blueprint.
   - Files: M `backend/tests/authz/matrix.py`, C `backend/tests/api/test_boards_authz.py`.
   - Reqs: BOARD-006-AC01 to AC07, BOARD-007-AC08, AC09. Design: §4.8.
@@ -414,7 +414,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 6. Column APIs and ordering
 
-- [ ] **T6.01 `POST /api/boards/{id}/columns`** — ACTIONABLE
+- [x] **T6.01 `POST /api/boards/{id}/columns`** — ACTIONABLE
   - Objective: create a column with `order` greater than every live column, after taking the board row lock.
   - Files: M `backend/app/blueprints/columns/*`.
   - Reqs: COLUMN-001-AC01 to AC05, A-01. Design: §5.6, §8.3. Guidelines: BE-12, BE-17.
@@ -422,7 +422,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: 201 returns `id`, `name`, a positive float `order`, `is_done` false. A missing name returns 400. A non-member gets 404. The `order` is computed after the lock.
   - Verify: tests for COLUMN-001-AC01 to AC04.
 
-- [ ] **T6.02 `PATCH /api/columns/{id}` (rename and `is_done`)** — ACTIONABLE (approved: DA-09, DA-11, DA-08)
+- [x] **T6.02 `PATCH /api/columns/{id}` (rename and `is_done`)** — ACTIONABLE (approved: DA-09, DA-11, DA-08)
   - Objective: rename a column (any member) and set `is_done` (administrator only, decided by the presence of the key), stamping or clearing `completed_at` on the column's live cards in one transaction.
   - Files: M `backend/app/blueprints/columns/*`.
   - Reqs: COLUMN-002-AC01 to AC14, UD-05, UD-12, A-13. Design: §5.6, §4.8, §8.4. Guidelines: BE-09, BE-10, BE-13.
@@ -430,7 +430,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a member sending the `is_done` key gets 403 whatever the value and the mixed body is rejected whole, an unchanged `is_done` is a 200 no-op with no card change and no event, soft-deleted columns return 404, and a forced failure leaves the column and cards unchanged. The extra column lock (DA-11) and the rule for `updated_at` on stamped cards (DA-08) are approved.
   - Verify: tests for COLUMN-002-AC01 to AC14.
 
-- [ ] **T6.03 `DELETE /api/columns/{id}` (soft delete)** — ACTIONABLE (approved: DA-08, DA-11)
+- [x] **T6.03 `DELETE /api/columns/{id}` (soft delete)** — ACTIONABLE (approved: DA-08, DA-11)
   - Objective: soft-delete a column and its live cards with the same `deleted_at`, administrator only, after taking the board row lock and the column lock.
   - Files: M `backend/app/blueprints/columns/*`.
   - Reqs: COLUMN-003-AC01 to AC15, UD-18, UD-23, A-15. Design: §5.6, §4.10, §8.4. Guidelines: BE-11, DB-06.
@@ -438,7 +438,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the response is `{"data": {"id": "<id>"}}`, no row is removed, cards keep `column_id`, previously deleted cards keep their own `deleted_at`, a second delete returns 404 for administrators and members, and a forced failure leaves everything unchanged. No activity event or notification is created or removed.
   - Verify: tests for COLUMN-003-AC01 to AC14.
 
-- [ ] **T6.04 `PATCH /api/boards/{id}/columns/reorder`** — ACTIONABLE
+- [x] **T6.04 `PATCH /api/boards/{id}/columns/reorder`** — ACTIONABLE
   - Objective: implement the approved partial reorder with the board row lock and final-state collision detection.
   - Files: M `backend/app/blueprints/columns/*`.
   - Reqs: COLUMN-004-AC01 to AC27, UD-20. Design: §5.6, §8.1. Guidelines: BE-06, BE-12, BE-17.
@@ -446,7 +446,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the body shape is exactly `{columns: [{id, order}]}`, a listed missing, foreign, or soft-deleted column returns the same 400 body, a final collision with an unlisted column returns 409, a swap succeeds, a no-op writes nothing, only changed columns get a new `updated_at`, and the response lists all active columns in ascending `order` with `id`, `name`, `order`, `is_done` and no `position`.
   - Verify: tests for COLUMN-004-AC01 to AC15, AC18 to AC26, with SQL capture for AC20.
 
-- [ ] **T6.05 Column response and visibility tests** — ACTIONABLE (approved: DA-03)
+- [x] **T6.05 Column response and visibility tests** — ACTIONABLE (approved: DA-03)
   - Objective: assert that column representations match across endpoints and that soft-deleted columns disappear everywhere.
   - Files: C `backend/tests/api/test_columns_contract.py`.
   - Reqs: COLUMN-004-AC19, COLUMN-005-AC06, AC07, COLUMN-003-AC08, AC10. Design: §5.2.
@@ -474,7 +474,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 7. Card APIs, assignment and positioning
 
-- [ ] **T7.01 `POST /api/columns/{id}/cards` and the `card_created` event** — ACTIONABLE (approved: DA-03)
+- [x] **T7.01 `POST /api/columns/{id}/cards` and the `card_created` event** — ACTIONABLE (approved: DA-03)
   - Objective: create a title-only card in the destination column after taking the column row lock, set `completed_at` in a done column, and append one `card_created` event. Add the shared event-recording helper.
   - Files: M `backend/app/blueprints/cards/*`, C `backend/app/events.py`.
   - Reqs: CARD-002-AC01 to AC10, ANALYTICS-006-AC01, UD-08, A-13. Design: §5.7, §8.3, §4.11. Guidelines: BE-12, BE-14, BE-17.
@@ -482,7 +482,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: 201 returns `id`, `title`, the column id, a positive `order` greater than every live card, and `assignee_id` null. Any `assignee_id` key returns 400. A soft-deleted column returns 404. No notification is created.
   - Verify: tests for CARD-002-AC01 to AC09 and ANALYTICS-006-AC01.
 
-- [ ] **T7.02 `PATCH /api/cards/{id}` (title)** — ACTIONABLE (approved: DA-09, DA-11, DA-08)
+- [x] **T7.02 `PATCH /api/cards/{id}` (title)** — ACTIONABLE (approved: DA-09, DA-11, DA-08)
   - Objective: update the card title, with the card row locked.
   - Files: M `backend/app/blueprints/cards/*`.
   - Reqs: CARD-003-AC01, AC02, AC05, AC06, AC07. Design: §5.7. Guidelines: BE-09.
@@ -490,7 +490,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: an empty title returns 400, `id`, `created_at`, `deleted_at` or any unknown key returns 400, a soft-deleted card returns 404, and `updated_at` increases only on a real change.
   - Verify: tests for CARD-003-AC01, AC02, AC05 to AC07.
 
-- [ ] **T7.03 Assignment and the `card_assigned` notification** — ACTIONABLE (approved: DA-13)
+- [x] **T7.03 Assignment and the `card_assigned` notification** — ACTIONABLE (approved: DA-13)
   - Objective: handle `assignee_id` in `PATCH /api/cards/{id}`: assign, reassign, unassign, with the card row lock and a state comparison. Create a notification only for an assignment to another member. Create **no activity event**.
   - Files: M `backend/app/blueprints/cards/*`, C `backend/app/blueprints/notifications/service.py` (creation function only).
   - Reqs: CARD-003-AC03, AC04, AC08 to AC12, NOTIF-003-AC01 to AC08, AC11, AC12, AC14, AC15, AC19, UD-08. Design: §4.11, §9.1. Guidelines: BE-14.
@@ -498,7 +498,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: an unknown user and a non-member give an identical 400, an unchanged value creates nothing, self-assignment and unassignment create no notification, the recipient must be a board member, the message has no comment text or email, a failure after the update leaves no assignee change and no notification, and the activity-event count never changes. The stored `message` and its wording are approved (DA-13).
   - Verify: tests for CARD-003-AC03, AC04, AC08 to AC12 and NOTIF-003-AC01 to AC08, AC12, AC14, AC19.
 
-- [ ] **T7.04 `DELETE /api/cards/{id}` (soft delete)** — ACTIONABLE (approved: DA-11)
+- [x] **T7.04 `DELETE /api/cards/{id}` (soft delete)** — ACTIONABLE (approved: DA-11)
   - Objective: set `deleted_at` to the request time with the card row locked. Record no event and no notification.
   - Files: M `backend/app/blueprints/cards/*`.
   - Reqs: CARD-004-AC01 to AC09, UD-18, UD-08, A-15. Design: §5.7, §4.10.
@@ -506,7 +506,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the response is `{"data": {"id": "<id>"}}`, the row, `column_id`, `completed_at`, assignee, comments, events, and notifications stay, and a second delete returns 404.
   - Verify: tests for CARD-004-AC01 to AC09.
 
-- [ ] **T7.05 `PATCH /api/cards/{id}/position` with tie rebalancing** — ACTIONABLE
+- [x] **T7.05 `PATCH /api/cards/{id}/position` with tie rebalancing** — ACTIONABLE
   - Objective: implement the approved move: validate, lock the destination column and the card, detect a tie, rebalance when needed, apply the `completed_at` rules, append a `card_moved` event only when the column changes, and return the card with `rebalanced`.
   - Files: M `backend/app/blueprints/cards/*` (including `CardPositionSchema`).
   - Reqs: CARD-005-AC01 to AC26, CARD-006-AC01 to AC05, UD-06, UD-12, A-13, ANALYTICS-006-AC02. Design: §5.7, §8.2. Guidelines: BE-06, BE-12, BE-13, BE-17.
@@ -514,7 +514,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a midpoint move returns the sent `order` with `rebalanced` false and does not touch other cards, a tie places the card immediately before the tied card and renumbers the live cards `1024.0, 2048.0, ...` sorted by `order`, `created_at`, `id`, a same-place request is a no-op with no write and no event, a soft-deleted or foreign destination column returns 400, and the whole operation is one transaction. The response has `order` and `rebalanced` and no `position`.
   - Verify: tests for CARD-005-AC01 to AC26 and CARD-006-AC01 to AC05.
 
-- [ ] **T7.06 `GET /api/cards?assignee=me`** — ACTIONABLE (approved: DA-03, DA-10, DA-19)
+- [x] **T7.06 `GET /api/cards?assignee=me`** — ACTIONABLE (approved: DA-03, DA-10, DA-19)
   - Objective: return the caller's assigned live cards, each with its board name, in one joined query.
   - Files: M `backend/app/blueprints/cards/*`.
   - Reqs: CARD-007-AC01 to AC06, API-001-AC06. Design: §5.7. Guidelines: DB-12.
@@ -522,7 +522,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a missing or different `assignee` returns 400, soft-deleted cards and cards in soft-deleted columns are excluded, an empty result is `[]`, and each card has `board_name`. The extra `board_id`, ordering, and the rejection of other parameters are approved (DA-03, DA-10, DA-19).
   - Verify: tests for CARD-007-AC01 to AC06.
 
-- [ ] **T7.07 Completion-timestamp and ordering tests** — ACTIONABLE
+- [x] **T7.07 Completion-timestamp and ordering tests** — ACTIONABLE
   - Objective: automate the `completed_at` invariant and the ordering rules.
   - Files: C `backend/tests/api/test_cards_ordering.py`, C `backend/tests/api/test_completion.py`.
   - Reqs: TEST-004, CARD-002-AC06, CARD-005-AC07 to AC11, COLUMN-002-AC08, AC09, ANALYTICS-003-AC09, A-13. Design: §8.2, §9.3.
@@ -550,7 +550,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 8. Comments and activity events
 
-- [ ] **T8.01 `POST /api/cards/{id}/comments`** — ACTIONABLE (approved: DA-03, DA-11)
+- [x] **T8.01 `POST /api/cards/{id}/comments`** — ACTIONABLE (approved: DA-03, DA-11)
   - Objective: create a comment owned by the caller, take the card row `FOR SHARE`, append a `comment_created` event, and create a `comment_added` notification for another assignee, all in one transaction.
   - Files: M `backend/app/blueprints/comments/*`.
   - Reqs: COMMENT-001-AC01 to AC08, NOTIF-003-AC09, AC10, AC13, ANALYTICS-006-AC03, UD-08. Design: §5.8, §4.11. Guidelines: BE-14.
@@ -558,7 +558,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: 201 returns `id`, `content`, an author, and `created_at`, whitespace-only content returns 400, a soft-deleted card returns 404 with no event, no notification when the author is the assignee or the card is unassigned, the notification has no comment text, and a failure leaves no comment and no notification.
   - Verify: tests for COMMENT-001-AC01 to AC08 and NOTIF-003-AC09, AC10, AC13.
 
-- [ ] **T8.02 `GET /api/cards/{id}/comments`** — ACTIONABLE (approved: DA-03)
+- [x] **T8.02 `GET /api/cards/{id}/comments`** — ACTIONABLE (approved: DA-03)
   - Objective: list a card's comments by `created_at` ascending.
   - Files: M `backend/app/blueprints/comments/*`.
   - Reqs: COMMENT-002-AC01 to AC05, A-05, A-15. Design: §5.8.
@@ -566,7 +566,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a soft-deleted card returns 404 and no comments, and an empty list is `[]`.
   - Verify: tests for COMMENT-002-AC01 to AC05.
 
-- [ ] **T8.03 `PATCH /api/comments/{id}` (owner only)** — ACTIONABLE
+- [x] **T8.03 `PATCH /api/comments/{id}` (owner only)** — ACTIONABLE
   - Objective: let only the author edit a comment. Administrators have no override. Record no event.
   - Files: M `backend/app/blueprints/comments/*`.
   - Reqs: COMMENT-003-AC01 to AC09, UD-05, A-14, ANALYTICS-006-AC08. Design: §5.8, §4.8. Guidelines: BE-09, BE-10.
@@ -574,7 +574,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a non-owner member or administrator gets 403 with empty, missing, or valid content and nothing changes, a non-member gets 404, a soft-deleted card gives 404, and the owner gets 200.
   - Verify: tests for COMMENT-003-AC01 to AC09.
 
-- [ ] **T8.04 `DELETE /api/comments/{id}` (owner only, hard delete)** — ACTIONABLE
+- [x] **T8.04 `DELETE /api/comments/{id}` (owner only, hard delete)** — ACTIONABLE
   - Objective: hard-delete the comment for its author. Events and notifications that refer to it stay.
   - Files: M `backend/app/blueprints/comments/*`.
   - Reqs: COMMENT-004-AC01 to AC08, UD-18, A-14, NOTIF-003-AC17. Design: §5.8, §3.6. Guidelines: DB-06, DB-09.
@@ -590,7 +590,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: tests assert one `card_created` per card creation, one `card_moved` per move to another column (none for a same-column move or rebalance), one `comment_created` per comment, **no event** for assignment, comment edit or delete, card delete, column delete, `is_done` toggle, reorder, and rejected requests, no route updates or deletes an event, events remain after card, column, and comment deletion, events leave only with their board, and all timestamps come from the single clock reading of the request.
   - Verify: `pytest backend/tests/api/test_activity_events.py` passes.
 
-- [ ] **T8.06 Comment tests** — ACTIONABLE
+- [x] **T8.06 Comment tests** — ACTIONABLE
   - Objective: complete the comment test suites and matrix entries.
   - Files: C `backend/tests/api/test_comments.py`, M `backend/tests/authz/matrix.py`.
   - Reqs: TEST-002, TEST-003, TEST-010-AC (comments after card delete), A-15. Design: §10.1.
@@ -602,7 +602,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 9. Notifications and analytics
 
-- [ ] **T9.01 Notification list query, item schema, and parameter validation (pre-work)** — ACTIONABLE (approved: DA-13)
+- [x] **T9.01 Notification list query, item schema, and parameter validation (pre-work)** — ACTIONABLE (approved: DA-13)
   - Objective: build the service function and item schema that the list endpoint will use, without choosing a default `per_page`, a maximum, a wrapper shape, or an unread count.
   - Files: M `backend/app/blueprints/notifications/{service,schema}.py`.
   - Reqs: NOTIF-001-AC01 to AC09 (except the pagination wrapper), UD-08. Design: §5.9, §9.5. Guidelines: BE-06.
@@ -610,7 +610,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the query returns only the caller's notifications ordered by `created_at` descending then `id` descending, an item has exactly `id`, `type`, `message`, `board_id`, `card_id`, `actor` (`id`, `name`), `is_read`, `created_at`, a notification stays after its card or column is soft-deleted or its comment is deleted, and `page` or `per_page` that is 0, negative, or not an integer is rejected with 400. Nothing in the code assumes a default or maximum `per_page` (UD-09).
   - Verify: unit tests for ordering, item keys, retention, and parameter validation with explicit values.
 
-- [ ] **T9.02 `PATCH /api/notifications/{id}/read`** — ACTIONABLE (approved: DA-13)
+- [x] **T9.02 `PATCH /api/notifications/{id}/read`** — ACTIONABLE (approved: DA-13)
   - Objective: mark a notification read for its recipient only, idempotently.
   - Files: M `backend/app/blueprints/notifications/{routes,service,schema}.py`.
   - Reqs: NOTIF-002-AC01 to AC08, UD-08. Design: §5.9. Guidelines: BE-14.
@@ -618,7 +618,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the recipient gets 200 with `is_read` true, an already-read notification stays read, another user's notification returns the same 404 as a missing one even on a shared board, only `is_read` changes, and a notification of a soft-deleted card can still be marked read.
   - Verify: tests for NOTIF-002-AC01 to AC08.
 
-- [ ] **T9.03 `GET /api/notifications` (finish the endpoint)** — BLOCKED (UD-09)
+- [x] **T9.03 `GET /api/notifications` (finish the endpoint)** — BLOCKED (UD-09)
   - Objective: expose the list endpoint with pagination.
   - Files: M `backend/app/blueprints/notifications/routes.py`.
   - Reqs: NOTIF-001-AC01 to AC09. Design: §5.9, §9.5, §12.1 (UD-09).
@@ -636,7 +636,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: tests cover every trigger and every non-trigger of NOTIF-003, repeated notifications, recipient membership, no comment text, rollback of assignment and comment, retention after card and column soft-delete and comment delete, and removal with the board.
   - Verify: `pytest backend/tests/api/test_notifications.py` passes. List-response assertions are added after T9.03.
 
-- [ ] **T9.05 Weekly window function and injectable clock use** — ACTIONABLE
+- [x] **T9.05 Weekly window function and injectable clock use** — ACTIONABLE
   - Objective: implement the UTC Monday-to-Monday half-open window from a single clock reading.
   - Files: M `backend/app/blueprints/analytics/service.py`.
   - Reqs: ANALYTICS-001-AC04, ANALYTICS-005-AC04, UD-14. Design: §9.3. Guidelines: BE-15.
@@ -644,7 +644,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: `start` is Monday 00:00:00 UTC, `end` is exactly seven days later, and the Monday instant belongs to the new week.
   - Verify: unit tests with clocks fixed at `2025-01-15T12:00:00Z`, `2025-01-19T23:59:59.900000Z`, and `2025-01-20T00:00:00Z`.
 
-- [ ] **T9.06 Analytics queries with SQLAlchemy joins** — ACTIONABLE
+- [x] **T9.06 Analytics queries with SQLAlchemy joins** — ACTIONABLE
   - Objective: implement `cards_per_column`, `completed_this_week`, and `member_activity` as three joined queries that exclude soft-deleted data and use the same window.
   - Files: M `backend/app/blueprints/analytics/service.py`.
   - Reqs: ANALYTICS-002 to ANALYTICS-005, UD-12, UD-13, UD-14, UD-18. Design: §9.3. Guidelines: BE-15, DB-12.
@@ -652,7 +652,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a column without cards appears with 0, a soft-deleted column is absent, `completed_this_week` counts each card once from its current `completed_at` (no use of events), `member_activity` has one entry per current member ordered by `activity_count` descending, `name`, `user_id`, and events of deleted cards, columns, and comments still count.
   - Verify: SQL-capture test finds a `JOIN` in each of the three statements (ANALYTICS-005-AC02, AC03).
 
-- [ ] **T9.07 `GET /api/boards/{id}/analytics`** — ACTIONABLE
+- [x] **T9.07 `GET /api/boards/{id}/analytics`** — ACTIONABLE
   - Objective: expose the endpoint with the approved response and the 400 rule for any query parameter.
   - Files: M `backend/app/blueprints/analytics/{routes,schema}.py`.
   - Reqs: ANALYTICS-001-AC01 to AC09, UD-14. Design: §5.10. Guidelines: BE-09.
@@ -660,7 +660,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: `data` has exactly `window`, `cards_per_column`, `completed_this_week`, `member_activity`, with no omitted keys and no nulls, the route has no query code, a member with a query parameter gets 400, a non-member with one gets 404, and no token gets 401.
   - Verify: tests for ANALYTICS-001-AC01 to AC09 and ANALYTICS-005-AC01.
 
-- [ ] **T9.08 Analytics test suite** — ACTIONABLE
+- [x] **T9.08 Analytics test suite** — ACTIONABLE
   - Objective: automate the analytics criteria with a fixed clock.
   - Files: C `backend/tests/api/test_analytics.py`.
   - Reqs: TEST-004, ANALYTICS-002-AC01 to AC05, ANALYTICS-003-AC01 to AC13, ANALYTICS-004-AC01 to AC11. Design: §10.1 (Analytics).
@@ -681,7 +681,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 10. Next.js frontend foundation and authentication
 
-- [ ] **T10.01 API DTO and Props type definitions** — ACTIONABLE (approved: DA-03)
+- [x] **T10.01 API DTO and Props type definitions** — ACTIONABLE (approved: DA-03)
   - Objective: define TypeScript interfaces for API objects and shared prop shapes.
   - Files: C `frontend/src/types/api.ts`.
   - Reqs: API-005, FRONT-021. Design: §5.2, §7.4. Guidelines: FE-09.
@@ -689,7 +689,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the interfaces match the approved keys. Fields beyond them (`completed_at`, timestamps, `board_id` on My Tasks, comment `author` shape) are those approved in DA-03. There is no `any`.
   - Verify: `tsc --noEmit` passes.
 
-- [ ] **T10.02 `errors.ts`, `toast.ts`, `useErrorHandler`** — ACTIONABLE
+- [x] **T10.02 `errors.ts`, `toast.ts`, `useErrorHandler`** — ACTIONABLE
   - Objective: create the error types, the react-hot-toast wrapper, and the error-to-toast hook.
   - Files: C `frontend/src/lib/errors.ts`, `frontend/src/lib/toast.ts`, `frontend/src/hooks/useErrorHandler.ts`.
   - Reqs: API-006, API-007, FRONT-020. Design: §7.5. Guidelines: FE-07.
@@ -697,7 +697,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: `ApiError` carries the status and the `error` string, `NetworkError` is separate, and the hook maps both to a toast.
   - Verify: Vitest tests for API-006 and API-007 acceptance criteria and FRONT-020.
 
-- [ ] **T10.03 `apiClient.ts` (server and client modes)** — ACTIONABLE
+- [x] **T10.03 `apiClient.ts` (server and client modes)** — ACTIONABLE
   - Objective: create the single API module with one call signature in two modes.
   - Files: C `frontend/src/lib/apiClient.ts`.
   - Reqs: API-005-AC01 to AC10, FRONT-022, UD-19. Design: §7.5, §6.10. Guidelines: FE-03, FE-06.
@@ -705,7 +705,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: server mode uses `API_BASE_URL` and a Bearer header from the session, client mode calls the same-origin proxy and sets no `Authorization`, 2xx resolves with `data`, non-2xx rejects with `ApiError`, a successful DELETE resolves with `{id}`, a 401 outside login clears the user and navigates to `/login` (client mode) or redirects to the expire route (server mode), and direct `NEXT_PUBLIC_API_BASE_URL` use exists only for `GET /api/health`.
   - Verify: Vitest tests for API-005-AC01 to AC10, including a test that finds no other direct-browser endpoint.
 
-- [ ] **T10.04 Server-only session module, JWT `exp` reader, and middleware** — ACTIONABLE (approved: DA-04)
+- [x] **T10.04 Server-only session module, JWT `exp` reader, and middleware** — ACTIONABLE (approved: DA-04)
   - Objective: read the cookie only on the server, read the JWT `exp` without trusting it, and redirect unauthenticated or expired requests before rendering.
   - Files: C `frontend/src/lib/session.server.ts`, `frontend/src/lib/jwtExp.server.ts`, `frontend/middleware.ts`.
   - Reqs: FRONT-003, FRONT-023-AC09, AC12, AC15, UD-03. Design: §6.4, §6.8, §6.9. Guidelines: FE-03, FE-04.
@@ -713,7 +713,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the session module imports `server-only` and importing it from a Client Component fails `next build`, protected paths redirect to `/login` when the cookie is missing or its `exp` has passed, and the stale cookie is cleared. The cookie name `revotask_session` is approved (DA-04).
   - Verify: Vitest tests for the middleware logic, and a build test that a Client Component importing the module fails.
 
-- [ ] **T10.05 Same-origin proxy** — ACTIONABLE (approved: DA-04, DA-07, DA-15)
+- [x] **T10.05 Same-origin proxy** — ACTIONABLE (approved: DA-04, DA-07, DA-15)
   - Objective: implement the catch-all proxy route handler to Flask.
   - Files: C `frontend/src/lib/proxy.server.ts`, C `frontend/src/app/api/[...path]/route.ts`.
   - Reqs: FRONT-023-AC04 to AC08, AC11, AC13, AC14, AC16, TEST-005-AC13, API-002-AC06 (for the matching Flask rule), A-07. Design: §6.5, §6.6. Guidelines: FE-05.
@@ -721,7 +721,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: it forwards only to `/api` on the `API_BASE_URL` host, does not forward `POST /api/auth/login` (returns 404), rejects, on POST, PATCH, DELETE, an `Origin` that is not exactly one of the explicitly trusted origins in `APP_ORIGIN` with 403 (a preview origin is trusted only if it is listed, there is no wildcard, suffix, or substring match, and a missing or `null` Origin is rejected, FRONT-023-AC08), a non-JSON type with 415, and a body larger than 1,048,576 bytes with 413 and the string envelope, judged from `Content-Length` and from the bytes read when it is missing (FRONT-023-AC16, DA-07), returns 401 without forwarding when there is no cookie (except register and health), rebuilds the outgoing headers from scratch with only `Authorization: Bearer`, expires the cookie on a Flask 401, and returns Flask's status and body unchanged. A 502 or 504 with the string envelope for an unreachable or slow Flask is approved (DA-15). Verification V-06, V-07, and V-08 cover the size limit, the trusted origins, and the upstream failures.
   - Verify: Vitest tests that call the handler with `Request` objects for each rule, including TEST-005-AC13 (trusted origins and the 413 size limit).
 
-- [ ] **T10.06 Session login, logout, and expire handlers** — ACTIONABLE (approved: DA-04, DA-07)
+- [x] **T10.06 Session login, logout, and expire handlers** — ACTIONABLE (approved: DA-04, DA-07)
   - Objective: implement the three session route handlers.
   - Files: C `frontend/src/app/api/session/login/route.ts`, `logout/route.ts`, `expire/route.ts`.
   - Reqs: FRONT-023-AC01, AC02, AC03, AC08, AC10, AC12, AC16, TEST-005-AC13, FRONT-004-AC02. Design: §6.3, §6.4, §6.5, §6.7. Guidelines: FE-04, FE-05.
@@ -729,7 +729,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: login sets exactly one cookie with `HttpOnly`, `Secure` in production, `SameSite=Lax`, `Path=/`, no `Domain`, and `Max-Age` equal to the remaining JWT lifetime, the login body has the user profile and never the JWT, logout and expire send an expired cookie, and login and logout check `Origin` against the explicit trusted list (FRONT-023-AC08) and reject a body larger than 1,048,576 bytes with 413 (FRONT-023-AC16).
   - Verify: Vitest tests for FRONT-023-AC01 to AC03, AC08, AC10, AC12.
 
-- [ ] **T10.07 `AuthContext`, `Providers`, and the root layout** — ACTIONABLE
+- [x] **T10.07 `AuthContext`, `Providers`, and the root layout** — ACTIONABLE
   - Objective: create the context with `currentUser`, `session`, `login`, `logout`, `updateProfile`, and mount it from the root layout with the user loaded on the server.
   - Files: C `frontend/src/context/AuthContext.tsx`, `frontend/src/components/layout/Providers.tsx`, M `frontend/src/app/layout.tsx`.
   - Reqs: FRONT-018-AC01 to AC09, Section 4.1. Design: §7.1, §7.4. Guidelines: FE-01, FE-02, FE-08.
@@ -737,15 +737,15 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a reload with a valid cookie shows the user without a login prompt, a passed expiry marks the session unauthenticated, `updateProfile` sends only `name` and `email`, and the JWT is not in the value, `document.cookie`, `localStorage`, or `sessionStorage`.
   - Verify: Vitest tests for FRONT-018-AC01 to AC09.
 
-- [ ] **T10.08 `BaseButton`, `BaseBadge`, `BaseModal`** — ACTIONABLE
+- [x] **T10.08 `BaseButton`, `BaseBadge`, `BaseModal`** — ACTIONABLE
   - Objective: create the shared UI components.
-  - Files: C `frontend/src/components/ui/{BaseButton,BaseBadge,BaseModal}.tsx`.
+  - Files: C `frontend/src/components/shared/{BaseButton,BaseBadge,BaseModal}.tsx`.
   - Reqs: FRONT-013, FRONT-014, FRONT-015. Design: §7.6. Guidelines: FE-02, FE-09, FE-10, FE-11, FE-12.
   - Depends: T1.06.
   - Done when: `BaseBadge` has no hooks or handlers, `BaseModal` moves focus in on open and back on close and closes with Escape and a close control, all styling uses Tailwind classes, and every component has a Props interface.
   - Verify: Vitest and React Testing Library tests for FRONT-013, FRONT-014, FRONT-015.
 
-- [ ] **T10.09 `/register` and `/login` pages** — ACTIONABLE
+- [x] **T10.09 `/register` and `/login` pages** — ACTIONABLE
   - Objective: build the two public pages as Server Components with Client Component forms.
   - Files: C `frontend/src/app/(auth)/register/page.tsx`, `(auth)/login/page.tsx`, `frontend/src/components/auth/{RegisterForm,LoginForm}.tsx`.
   - Reqs: FRONT-001-AC01 to AC06, FRONT-002-AC01 to AC04, A-08, UD-04. Design: §7.2. Guidelines: FE-01, FE-12.
@@ -753,7 +753,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: an empty field shows a message and sends no request, a 201 navigates to `/login` with a success toast, a 409 shows the server's `error`, a 401 on login shows a message and stays on `/login`, a success navigates to `/`, each page links to the other, and registration goes through the proxy.
   - Verify: Vitest tests for FRONT-001 and FRONT-002.
 
-- [ ] **T10.10 Protected layout, header, and logout** — ACTIONABLE
+- [x] **T10.10 Protected layout, header, and logout** — ACTIONABLE
   - Objective: create the `(app)` layout with `AppHeader` (logout control and the slot for the notification bell) and loading, not-found, and error fallbacks.
   - Files: C `frontend/src/app/(app)/layout.tsx`, `frontend/src/components/layout/AppHeader.tsx`, `frontend/src/app/not-found.tsx`, `frontend/src/app/error.tsx`, `frontend/src/components/boards/ErrorState.tsx`.
   - Reqs: FRONT-003, FRONT-004-AC01 to AC03, FRONT-005-AC05. Design: §6.10, §7.1, §7.6. Guidelines: FE-01, FE-07.
@@ -769,7 +769,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a test lists files with `"use client"` and asserts the page files and layouts have none, a test asserts the JWT string never appears in page output or storage in the test harness, and no page or Client Component reads the session cookie directly.
   - Verify: `npm test` passes.
 
-- [ ] **T10.12 Manual end-to-end smoke of registration, login, and logout** — ACTIONABLE
+- [x] **T10.12 Manual end-to-end smoke of registration, login, and logout** — ACTIONABLE
   - Objective: confirm the authentication flow works between Next.js and the running Flask API locally.
   - Files: none.
   - Reqs: FRONT-001 to FRONT-004, FRONT-023. Design: §1.3.
@@ -781,7 +781,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 11. Dashboard and board interface
 
-- [ ] **T11.01 `/` Dashboard with `BoardCard` and board creation** — ACTIONABLE (approved: DA-03)
+- [x] **T11.01 `/` Dashboard with `BoardCard` and board creation** — ACTIONABLE (approved: DA-03)
   - Objective: build the dashboard as a Server Component that lists the user's boards with `BoardCard` and a Client Component form to create a board.
   - Files: C `frontend/src/app/(app)/page.tsx`, `(app)/loading.tsx`, `frontend/src/components/boards/{BoardCard,CreateBoardForm}.tsx`.
   - Reqs: FRONT-005-AC01 to AC07, FRONT-024. Design: §7.2. Guidelines: FE-01, FE-02, FE-03.
@@ -789,7 +789,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: boards come from a server-side fetch with no token in the HTML, `BoardCard` has no hooks or handlers and links to `/boards/[id]`, the empty state shows a message and the create control, the loading UI has `role="status"`, a non-401 failure shows the `error` text, and a created board appears without a full reload.
   - Verify: Vitest tests for FRONT-005 and FRONT-024.
 
-- [ ] **T11.02 `/boards/[id]` page and `BoardView` container** — ACTIONABLE (approved: DA-03)
+- [x] **T11.02 `/boards/[id]` page and `BoardView` container** — ACTIONABLE (approved: DA-03)
   - Objective: build the board page as a Server Component that fetches the board and analytics on the server and renders a Client Component container that owns board state.
   - Files: C `frontend/src/app/(app)/boards/[id]/{page,loading,not-found}.tsx`, `frontend/src/components/boards/BoardView.tsx`.
   - Reqs: FRONT-006-AC01, AC02, AC07, AC08, FRONT-021. Design: §7.2. Guidelines: FE-01, FE-02, FE-03, FE-13.
@@ -797,7 +797,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: columns and cards appear in ascending `order`, a 404 shows "board not found" with no board data, the page file has no `"use client"`, and no JWT is in the HTML.
   - Verify: Vitest tests for FRONT-006-AC01, AC02, AC07, AC08.
 
-- [ ] **T11.03 `ColumnHeader`** — ACTIONABLE
+- [x] **T11.03 `ColumnHeader`** — ACTIONABLE
   - Objective: show the column name and card count, rename for every member, and show delete and the Done/Active toggle only to an administrator.
   - Files: C `frontend/src/components/boards/ColumnHeader.tsx`.
   - Reqs: FRONT-025-AC01 to AC17, FRONT-006-AC06, AC09, AC10, UD-05, UD-12, A-13. Design: §7.6. Guidelines: FE-11, FE-13.
@@ -805,7 +805,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a member sees no delete control and no toggle, an administrator confirms deletion with a message that the cards will be deleted too, a failed delete keeps the column and shows a toast, and the toggle sends `is_done` and refreshes analytics.
   - Verify: Vitest tests for FRONT-025 and the relevant FRONT-006 criteria.
 
-- [ ] **T11.04 Add-column form** — ACTIONABLE
+- [x] **T11.04 Add-column form** — ACTIONABLE
   - Objective: create columns from the board page.
   - Files: C `frontend/src/components/boards/AddColumnForm.tsx`.
   - Reqs: FRONT-006-AC03. Design: §7.6.
@@ -813,7 +813,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a submitted name creates a column through the proxy and it appears after the existing ones, an empty name shows a message and sends nothing.
   - Verify: Vitest test for FRONT-006-AC03.
 
-- [ ] **T11.05 `CardItem` and `AddCardForm`** — ACTIONABLE
+- [x] **T11.05 `CardItem` and `AddCardForm`** — ACTIONABLE
   - Objective: render card tiles and a title-only card creation form per column.
   - Files: C `frontend/src/components/boards/{CardItem,AddCardForm}.tsx`.
   - Reqs: FRONT-006-AC04, AC05, FRONT-026, UD-08, FRONT-011-AC01. Design: §7.6. Guidelines: FE-11, FE-12.
@@ -821,7 +821,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the card appears in its column after creation, `AddCardForm` has no assignee control, activating a card opens `CardDetailModal`, and the card shows its assignee name if assigned.
   - Verify: Vitest tests for FRONT-026 and FRONT-006-AC04, AC05.
 
-- [ ] **T11.06 `CardDetailModal`** — ACTIONABLE (approved: DA-03)
+- [x] **T11.06 `CardDetailModal`** — ACTIONABLE (approved: DA-03)
   - Objective: show and edit one card, with the assignee dropdown built from `board.members`, delete after confirmation, and the comment list slot.
   - Files: C `frontend/src/components/boards/CardDetailModal.tsx`.
   - Reqs: FRONT-011-AC01 to AC13, FRONT-006-AC11, UD-08. Design: §7.6. Guidelines: FE-11, FE-12, FE-13.
@@ -829,7 +829,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: saving a title calls `PATCH /api/cards/{id}`, the dropdown lists the board members and an "Unassigned" option and sends `assignee_id` or `null`, the dropdown works with Tab, arrow keys, and Enter, deleting calls `DELETE /api/cards/{id}`, no extra request is made for members, and the modal closes with Escape and returns focus.
   - Verify: Vitest tests for FRONT-011-AC01 to AC13.
 
-- [ ] **T11.07 `CommentList`** — ACTIONABLE (approved: DA-03)
+- [x] **T11.07 `CommentList`** — ACTIONABLE (approved: DA-03)
   - Objective: list, add, edit, and delete the user's own comments.
   - Files: C `frontend/src/components/comments/CommentList.tsx`.
   - Reqs: FRONT-012, COMMENT-001 to COMMENT-004. Design: §7.6.
@@ -837,7 +837,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: edit and delete controls show only on the user's own comments, a 403 from the server shows a toast, and whitespace-only content is rejected before sending.
   - Verify: Vitest tests for FRONT-012.
 
-- [ ] **T11.08 Card search** — ACTIONABLE
+- [x] **T11.08 Card search** — ACTIONABLE
   - Objective: filter card titles on the loaded board data with a 300 ms debounce and no API request.
   - Files: C `frontend/src/components/boards/CardSearchInput.tsx`, C `frontend/src/hooks/useDebouncedValue.ts`.
   - Reqs: FRONT-008-AC01 to AC08, UD-10, UD-11, A-11, NFR-006-AC01. Design: §7.11. Guidelines: FE-16.
@@ -845,7 +845,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: with fake timers nothing changes at 299 ms and the filter runs at 300 ms, the timer restarts on a keystroke and clears on unmount, matching ignores case, an empty or whitespace term shows all cards, columns stay visible, and no request is sent.
   - Verify: Vitest tests for FRONT-008-AC01 to AC08 and NFR-006-AC01.
 
-- [ ] **T11.09 `AnalyticsPanel`** — ACTIONABLE
+- [x] **T11.09 `AnalyticsPanel`** — ACTIONABLE
   - Objective: render the analytics response and refresh it after card and column mutations.
   - Files: C `frontend/src/components/boards/AnalyticsPanel.tsx`.
   - Reqs: FRONT-007-AC01 to AC08, UD-14. Design: §7.6, §9.3. Guidelines: FE-18.
@@ -853,7 +853,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the period label is built from `window.start` and `window.end` in UTC with `end` exclusive ("Week of Jan 13–19, 2025 (UTC)" and the month and year variants), zero is shown as "0", an empty board shows "This board has no columns yet", members appear in API order with no email, there is no timezone or date control, a failure shows an error in the panel only, and a successful create, move, delete, or Done toggle re-fetches while a failed one does not.
   - Verify: Vitest tests for FRONT-007 including the Asia/Jakarta and America/Los_Angeles time zone cases.
 
-- [ ] **T11.10 Notification deep link handling** — ACTIONABLE (approved: DA-04)
+- [x] **T11.10 Notification deep link handling** — ACTIONABLE (approved: DA-04)
   - Objective: open the board and the card named by the `?card=` parameter, or show the "no longer available" message.
   - Files: M `frontend/src/components/boards/BoardView.tsx`, M board `page.tsx`.
   - Reqs: FRONT-006-AC12, FRONT-016-AC08. Design: §7.2.
@@ -881,7 +881,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 12. Card interaction, drag-and-drop and accessibility
 
-- [ ] **T12.01 Pure ordering functions** — ACTIONABLE
+- [x] **T12.01 Pure ordering functions** — ACTIONABLE
   - Objective: implement `computeCardOrder`, `computeColumnOrder`, and `normalizeColumns` as pure functions with no React imports.
   - Files: C `frontend/src/lib/ordering.ts`, C `frontend/tests/unit/ordering.test.ts`.
   - Reqs: FRONT-019-AC03, AC07, AC08, AC11, AC12, AC14, AC15, UD-06, UD-20. Design: §7.9. Guidelines: FE-15.
@@ -889,7 +889,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: a midpoint is used when a distinct value exists, a card with no distinct midpoint sends the order of the following card, an empty column gets a positive value, a column with no distinct midpoint triggers a full normalization (`1024.0, 2048.0, ...`), no minimum-gap threshold exists, `rebalanced` is never sent, and values are JSON numbers named `order`.
   - Verify: unit tests at the numeric limits (adjacent floats, very small first order, very large last order).
 
-- [ ] **T12.02 `useDragAndDrop` shared move logic** — ACTIONABLE
+- [x] **T12.02 `useDragAndDrop` shared move logic** — ACTIONABLE
   - Objective: implement `moveCardTo` and `moveColumnTo` with optimistic update, rollback, refetch, and one in-flight move at a time.
   - Files: C `frontend/src/hooks/useDragAndDrop.ts`.
   - Reqs: FRONT-019-AC01, AC02, AC04 to AC10, AC13, AC16. Design: §7.7, §7.10. Guidelines: FE-14, FE-15.
@@ -897,7 +897,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the card appears in the target at once, a failure restores the previous place and shows a toast, a same-place move sends nothing, neighbors include cards hidden by search, a successful column reorder replaces the columns with the response, a 400 or 409 on a column request restores and refetches, and `rebalanced` true triggers a refetch that replaces every displayed `order`.
   - Verify: Vitest tests for FRONT-019-AC01 to AC16 using a mocked `apiClient`.
 
-- [ ] **T12.03 Native HTML5 drag-and-drop wiring** — ACTIONABLE
+- [x] **T12.03 Native HTML5 drag-and-drop wiring** — ACTIONABLE
   - Objective: connect `draggable`, `dragstart`, `dragover`, and `drop` on cards and columns to the shared move logic.
   - Files: M `frontend/src/components/boards/{BoardView,CardItem,ColumnHeader}.tsx`.
   - Reqs: FRONT-019, FRONT-006. Design: §7.7. Guidelines: FE-14.
@@ -905,14 +905,14 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: `dataTransfer` carries only ids, no drag-and-drop library is imported, and a drop on a column or between cards calls the shared logic.
   - Verify: Vitest tests that fire drag events, and the lint rule from T1.06.
 
-- [ ] **T12.04 Card move menu (keyboard and touch)** — ACTIONABLE (approved: DA-18)
+- [x] **T12.04 Card move menu (keyboard and touch)** — ACTIONABLE (approved: DA-18)
   - Objective: add a visible "Move card" button on every card that opens `CardMoveMenu`, where the user chooses a destination column and a place ("Top of column" or "After <card title>"), and calls `moveCardTo`.
   - Files: C `frontend/src/components/boards/CardMoveMenu.tsx`, M `CardItem.tsx`, M `BoardView.tsx` (the single `aria-live="polite"` region).
   - Reqs: FRONT-019-AC17 to AC24, NFR-007-AC04 to AC06, approved by the human owner under DA-18 (Limadijaya Suhendra, 2026-11-24). Design: §7.8. Guidelines: FE-14, FE-12.
   - Depends: T1.01 (approval record), T12.02, T10.08.
   - Done when: the acceptance criteria FRONT-019-AC17 to AC24 and NFR-007-AC04 to AC06 hold: the button has an accessible name with the card title and no hover is needed, the menu works with Tab, Enter, Space, arrow keys, and taps, Escape closes it, focus moves in and returns to the card's button, the request is exactly `PATCH /api/cards/{id}/position` with `column_id` and `order` and equals a drop's request, an unchanged place sends nothing, a failure rolls back with a toast, the live region announces the result, the control is shown to administrators and members, and no drag-and-drop library is added.
   - Verify: Vitest and React Testing Library tests with keyboard events only (TEST-005-AC12).
-- [ ] **T12.05 Column move buttons and live announcements** — ACTIONABLE (approved: DA-18)
+- [x] **T12.05 Column move buttons and live announcements** — ACTIONABLE (approved: DA-18)
   - Objective: add "Move column left" and "Move column right" buttons to `ColumnHeader` and the column announcements to the live region.
   - Files: M `frontend/src/components/boards/ColumnHeader.tsx`, M `BoardView.tsx`.
   - Reqs: FRONT-025-AC18 to AC21, FRONT-019-AC23, NFR-007-AC04 to AC06, approved by the human owner under DA-18 (Limadijaya Suhendra, 2026-11-24). Design: §7.8. Guidelines: FE-14.
@@ -938,7 +938,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
 
 ## Milestone 13. My Tasks, Profile and Notifications UI
 
-- [ ] **T13.01 `/my-tasks` page** — ACTIONABLE (approved: DA-03, DA-04)
+- [x] **T13.01 `/my-tasks` page** — ACTIONABLE (approved: DA-03, DA-04)
   - Objective: show the caller's assigned cards grouped by board name, fetched on the server.
   - Files: C `frontend/src/app/(app)/my-tasks/{page,loading}.tsx`.
   - Reqs: FRONT-009-AC01 to AC04, CARD-007. Design: §7.2. Guidelines: FE-01, FE-03.
@@ -946,7 +946,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: cards sit under one heading per board name, an empty list shows a message, the loading UI has `role="status"`, an error shows the `error` text, and the page file has no `"use client"`. Linking each card to the board with `?card=` is approved (DA-04).
   - Verify: Vitest tests for FRONT-009.
 
-- [ ] **T13.02 `/profile` page** — ACTIONABLE
+- [x] **T13.02 `/profile` page** — ACTIONABLE
   - Objective: show and edit `name` and `email` with no password field.
   - Files: C `frontend/src/app/(app)/profile/{page,loading}.tsx`, `frontend/src/components/profile/ProfileForm.tsx`.
   - Reqs: FRONT-010-AC01 to AC04, FRONT-018-AC06 to AC08, USER-001, USER-002. Design: §7.2, §7.4. Guidelines: FE-08, FE-12.
@@ -954,7 +954,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: the form shows the current values, a successful update changes `currentUser` without a reload, 400 and 409 show the server `error` and leave `currentUser` unchanged, and there is no password input.
   - Verify: Vitest tests for FRONT-010 and FRONT-018-AC06 to AC08.
 
-- [ ] **T13.03 `useNotifications` polling mechanics** — ACTIONABLE
+- [x] **T13.03 `useNotifications` polling mechanics** — ACTIONABLE
   - Objective: poll every 30,000 ms through the proxy, without overlap, with no request while unauthenticated, stopping on unmount and logout. Isolate response parsing behind one adapter function so the response shape can be added later.
   - Files: C `frontend/src/hooks/useNotifications.ts`.
   - Reqs: FRONT-017-AC01 to AC03, AC05, AC06, NFR-006-AC02, UD-08. Design: §7.12, §9.2. Guidelines: FE-17.
@@ -962,7 +962,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when: with fake timers there is one request on mount, still one at 29,999 ms, two at 30,000 ms, and four in 90 seconds. A failed poll shows at most one generic indication ("Notifications could not be updated") and the next poll still runs. The response shape is **not assumed** (UD-09).
   - Verify: Vitest tests for FRONT-017-AC01 to AC03, AC05, AC06 and NFR-006-AC02.
 
-- [ ] **T13.04 Notification response adapter and unread count** — BLOCKED (UD-09)
+- [x] **T13.04 Notification response adapter and unread count** — BLOCKED (UD-09)
   - Objective: parse the list response and compute the unread count shown by the bell.
   - Files: M `frontend/src/hooks/useNotifications.ts`.
   - Reqs: FRONT-017-AC04, FRONT-016, NOTIF-001. Design: §9.5, §12.1 (UD-09).
@@ -972,7 +972,7 @@ The application factory and configuration were built in T2.01 and the fixtures i
   - Done when (after approval): the hook returns the unread count and a function that calls `PATCH /api/notifications/{id}/read`.
   - Verify: Vitest test for FRONT-017-AC04 against the approved shape.
 
-- [ ] **T13.05 `NotificationBell`** — BLOCKED (UD-09)
+- [x] **T13.05 `NotificationBell`** — BLOCKED (UD-09)
   - Objective: show the unread count, list notifications, mark one as read, and open its board and card, with keyboard support.
   - Files: C `frontend/src/components/notifications/NotificationBell.tsx`, M `frontend/src/components/layout/AppHeader.tsx`.
   - Reqs: FRONT-016-AC01 to AC14, UD-08. Design: §7.6, §9.2. Guidelines: FE-17, FE-12.
@@ -1027,7 +1027,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: every approved component (`CardDetailModal`, `CommentList`, `BaseButton`, `BaseBadge`, `BaseModal`, `NotificationBell`, `BoardCard`, `ColumnHeader`, `AddCardForm`) and hook (`useNotifications`, `useDragAndDrop`, `useErrorHandler`, `AuthContext`) has a test file, with `NotificationBell` completed only after UD-09. A coverage report can be produced and has no limit (UD-15).
   - Verify: `npm test -- --coverage` prints a report, and a script checks that each listed file has a test.
 
-- [ ] **T14.04 Playwright configuration and helpers** — BLOCKED (UD-16, UD-22)
+- [x] **T14.04 Playwright configuration and helpers** — BLOCKED (UD-16, UD-22)
   - Objective: configure Playwright so it takes its base URL and test account from environment variables, with a wait helper that never uses a fixed delay.
   - Files: M `frontend/e2e/playwright.config.ts`, C `frontend/e2e/helpers.ts`.
   - Reqs: TEST-006-AC01 to AC07. Design: §10.3, §10.4. Guidelines: FE-21.
@@ -1037,7 +1037,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when (after approval): the configuration works for the approved target, no test uses `waitForTimeout`, and every test reads and changes only data it created.
   - Verify: `npx playwright test --list` succeeds and the lint rule for `waitForTimeout` passes.
 
-- [ ] **T14.05 Playwright authentication scenarios** — BLOCKED (UD-16, UD-22)
+- [x] **T14.05 Playwright authentication scenarios** — BLOCKED (UD-16, UD-22)
   - Objective: automate the four authentication scenarios and the cookie protection check.
   - Files: C `frontend/e2e/auth.spec.ts`.
   - Reqs: TEST-007-AC01 to AC05, FRONT-002, FRONT-003, FRONT-004, FRONT-023. Design: §10.3.
@@ -1046,7 +1046,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: successful login redirects to `/`, invalid credentials show an error, an unauthenticated visit redirects to login, a post-logout visit redirects to login, and the session cookie is `httpOnly` with no JWT in `document.cookie`, `localStorage`, or `sessionStorage`.
   - Verify: the spec passes against the approved target.
 
-- [ ] **T14.06 Playwright Kanban journey** — BLOCKED (UD-16, UD-22)
+- [x] **T14.06 Playwright Kanban journey** — BLOCKED (UD-16, UD-22)
   - Objective: automate the eight-step journey: log in, create a board, add two columns, create a card, open and inspect it, drag it to the second column, verify the position, reload and verify it stays.
   - Files: C `frontend/e2e/kanban.spec.ts`.
   - Reqs: TEST-008-AC01 to AC08, FRONT-019, FRONT-006. Design: §10.3.
@@ -1055,7 +1055,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: each step waits on an observable condition (element state, URL, or network response), and the spec cleans up the board it created.
   - Verify: the spec passes on the approved target and a rerun passes without manual cleanup.
 
-- [ ] **T14.07 Playwright responsive tests** — BLOCKED (UD-16, UD-22)
+- [x] **T14.07 Playwright responsive tests** — BLOCKED (UD-16, UD-22)
   - Objective: check the core flows at 360 px and 1920 px with no horizontal page scroll.
   - Files: C `frontend/e2e/responsive.spec.ts`.
   - Reqs: TEST-009, NFR-007-AC01 to AC03. Design: §10.3.

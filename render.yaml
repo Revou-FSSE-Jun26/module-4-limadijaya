@@ -1,0 +1,29 @@
+# Render Blueprint for the Flask API (design 11.2). The frontend is deployed separately on Vercel.
+# Secrets are never stored here: every `sync: false` value is entered in the Render dashboard.
+services:
+  - type: web
+    name: revotask-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Migrations run before the server starts (NFR-009). The free plan has no pre-deploy hook.
+    startCommand: flask --app wsgi:app db upgrade && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.2
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: JWT_ACCESS_TOKEN_EXPIRES_SECONDS
+        value: "3600"
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "2"

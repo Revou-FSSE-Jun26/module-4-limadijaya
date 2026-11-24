@@ -16,7 +16,7 @@ export default function Providers({ initialUser, initialExpiresAt, children }: P
   return (
     <AuthProvider initialUser={initialUser} initialExpiresAt={initialExpiresAt}>
       {children}
-      <Toaster position="top-right" />
+      <Toaster position="bottom-right" />
     </AuthProvider>
   );
 }
