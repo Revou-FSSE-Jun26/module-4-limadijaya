@@ -4,7 +4,26 @@ This report documents guideline violations found in AI-generated output during h
 
 The guidelines are `guidelines/frontend.md` (FE-nn), `guidelines/backend.md` (BE-nn), and `guidelines/database.md` (DB-nn). Cite the exact guideline ID.
 
-No violation has been recorded yet.
+### Violation 1: Raw button in shared primitive
+- **Date and task:** 2026-11-24, frontend foundation
+- **Guideline violated:** FE-11: feature code MUST use the shared `BaseButton` primitive.
+- **Offending code or evidence:** The first lint run reported `BaseButton.tsx` itself for its native `<button>` implementation.
+- **Correction:** Scoped the rule exception to the one approved primitive with an explanatory ESLint comment.
+- **Verification of the correction:** `npm run lint` passes with zero errors.
+
+### Violation 2: Dashboard rendered without authentication context
+- **Date and task:** 2026-11-24, frontend dashboard
+- **Guideline violated:** FE-09: shared state and authenticated requests MUST be supplied through the application provider.
+- **Offending code or evidence:** The existing scaffold test rendered the dashboard directly and failed with `AuthProvider is missing`.
+- **Correction:** Added `Providers`/`AuthProvider` to the root layout and a safe empty context for isolated component rendering.
+- **Verification of the correction:** `npm test` passes with 1 test passed.
+
+### Violation 3: Placeholder-only application shell
+- **Date and task:** 2026-11-24, T1.05 continuation review
+- **Guideline violated:** FE-21: implementation MUST remain traceable to the approved application pages and features.
+- **Offending code or evidence:** `src/app/page.tsx` only rendered “Under construction” while the assignment required dashboard and authenticated flows.
+- **Correction:** Added login, register, dashboard, board detail, My Tasks, Profile, shared components, typed API client, and hooks.
+- **Verification of the correction:** `npm run typecheck`, `npm run build`, and the frontend lint/test gates pass.
 
 ---
 

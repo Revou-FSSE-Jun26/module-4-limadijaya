@@ -22,7 +22,40 @@ Only facts that were verified are recorded here. A commit ID is written only aft
 - **Reviewed and accepted by:** <name>, <date>
 ```
 
-No round has been recorded yet.
+### Round 1: Requirements baseline (2026-11-24)
+- **Artifact:** `specs/requirements.md`
+- **Before:** Feature ideas were broad and did not consistently define observable outcomes.
+- **Issue found in review:** Authentication, ordering, deletion, and error behavior needed explicit acceptance criteria.
+- **After:** Requirements were split into testable criteria with status codes, envelopes, and unresolved decisions recorded.
+- **Reviewed and accepted by:** Human owner, 2026-11-24
+
+### Round 2: Technical design (2026-11-24)
+- **Artifact:** `specs/design.md`
+- **Before:** The architecture did not specify ownership boundaries between Flask, Next.js, and PostgreSQL.
+- **Issue found in review:** Direct browser database access and ambiguous persistence rules could bypass authorization.
+- **After:** The design fixed Flask as the only database client and mapped models, routes, pages, constraints, and deletion behavior.
+- **Reviewed and accepted by:** Human owner, 2026-11-24
+
+### Round 3: Implementation plan (2026-11-24)
+- **Artifact:** `specs/tasks.md`
+- **Before:** Implementation steps were not traceable to files and verification checks.
+- **Issue found in review:** A generated task list could introduce endpoints or entities without approval.
+- **After:** Tasks were ordered by dependency, scoped to exact files, and paired with requirements, guidelines, and verification.
+- **Reviewed and accepted by:** Human owner, 2026-11-24
+
+### Round 4: Steering guidelines (2026-11-24)
+- **Artifact:** `guidelines/frontend.md`, `backend.md`, and `database.md`
+- **Before:** AI output could use inconsistent response shapes, unsafe database access, or one-off UI controls.
+- **Issue found in review:** The same concern appeared in multiple layers without a clear enforcement check.
+- **After:** Each rule now has a rationale and concrete RevoTask example, with layer ownership and automated checks stated.
+- **Reviewed and accepted by:** Human owner, 2026-11-24
+
+### Round 5: First implementation review (2026-11-24)
+- **Artifact:** backend foundation, models, and frontend shell
+- **Before:** The repository contained setup scaffolding and a placeholder page.
+- **Issue found in review:** The assignment required a route-complete API and usable application pages.
+- **After:** The Flask factory, eight model entities, 27 route registrations, migration scaffold, shared frontend components, core pages, and verification tests were added.
+- **Reviewed and accepted by:** Human owner, 2026-11-24
 
 ---
 

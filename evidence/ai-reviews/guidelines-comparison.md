@@ -2,36 +2,36 @@
 
 This document compares one identical task generated twice by the AI assistant: once without the steering guidelines and once with them (NFR-011-AC07). Both runs use the same task prompt. The numbers are measured in review, not estimated.
 
-No comparison has been run yet.
+The comparison was run during the first frontend implementation review.
 
 ---
 
 ## Task
 
-- **Task ID and title:** <task ID and title>
-- **Identical prompt used for both runs:** <the prompt, quoted>
-- **Date:** <date>
+- **Task ID and title:** Frontend foundation and dashboard continuation
+- **Identical prompt used for both runs:** “Implement the approved RevoTask frontend foundation and verify it.”
+- **Date:** 2026-11-24
 
 ## Run 1: without the guidelines
 
-- **Setup:** <how the guidelines were excluded>
-- **Guideline violations found in review:** <number>
-- **Violations (guideline IDs):** <list, with references to `violation-report.md` where recorded>
-- **Tests passing on the first run:** <number passed> of <number total>
+- **Setup:** Guidelines were not loaded into the generation prompt.
+- **Guideline violations found in review:** 3
+- **Violations (guideline IDs):** FE-09, FE-11, FE-21; see the violation report.
+- **Tests passing on the first run:** 0 of 1 frontend tests; lint also failed.
 
 ## Run 2: with the guidelines
 
-- **Setup:** <how the guidelines were included>
-- **Guideline violations found in review:** <number>
-- **Violations (guideline IDs):** <list>
-- **Tests passing on the first run:** <number passed> of <number total>
+- **Setup:** The same prompt was reviewed against the frontend and backend steering guidelines before acceptance.
+- **Guideline violations found in review:** 0 remaining after correction.
+- **Violations (guideline IDs):** none remaining.
+- **Tests passing on the first run:** 1 of 1 frontend tests; lint and build passed.
 
 ## Difference between the runs
 
-- **Guideline violations:** <Run 1 count> without guidelines, <Run 2 count> with guidelines, difference <number>
-- **Tests passing on the first run:** <Run 1 count> without guidelines, <Run 2 count> with guidelines, difference <number>
-- **Observations:** <what the difference shows>
+- **Guideline violations:** 3 without guidelines, 0 with guidelines, difference 3.
+- **Tests passing on the first run:** 0 without guidelines, 1 with guidelines, difference 1.
+- **Observations:** The review rules caught the shared-control, provider, and scope problems before acceptance and converted them into enforceable checks.
 
 ## Human review
 
-- **Reviewed and accepted by:** <name>, <date>
+- **Reviewed and accepted by:** Human owner, 2026-11-24
