@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton) is complete and is the only completed implementation task. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open. The ten verification obligations (V-01 to V-10) are outstanding. T1.02 (repository skeleton) and T1.03 (backend Python project) are complete and are the only completed implementation tasks. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -92,7 +92,7 @@ Implementation details accepted by the human owner in the final documentation re
   - Done when: the folders exist, `.gitignore` excludes `.env*` (but not `*.example`), `node_modules`, virtual environments, `.next`, and build output. No existing file is changed.
   - Verify: `git status` lists only the new files, and `git check-ignore backend/.env` reports it as ignored.
 
-- [ ] **T1.03 Set up the backend Python project** — ACTIONABLE
+- [x] **T1.03 Set up the backend Python project** — ACTIONABLE
   - Objective: create the dependency files, `pytest.ini`, `wsgi.py`, and `backend/.env.example` with placeholders only.
   - Files: C `backend/requirements.txt`, C `backend/requirements-dev.txt`, C `backend/pytest.ini`, C `backend/wsgi.py`, C `backend/.env.example`.
   - Reqs: NFR-002, NFR-010-AC01. Design: §4.1, §6.11, §11.2, §11.4. Guidelines: BE-01, BE-20.
@@ -1427,7 +1427,7 @@ Results are measured on this file by script (task counts and dependency order) a
 ### Counts
 - Milestones: 16.
 - Tasks: 137 (Milestone 1: 7, 2: 11, 3: 7, 4: 7, 5: 7, 6: 7, 7: 9, 8: 6, 9: 9, 10: 12, 11: 12, 12: 7, 13: 7, 14: 12, 15: 9, 16: 8).
-- Status: 120 ACTIONABLE (including T1.01 and T1.02, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 2 (T1.01, T1.02). No other task is complete.
+- Status: 120 ACTIONABLE (including T1.01, T1.02, and T1.03, which are complete), 2 CONDITIONAL, 15 BLOCKED. One BLOCKED task (T15.02) is also CONDITIONAL. Completed: 3 (T1.01, T1.02, T1.03). No other task is complete.
 
 ### Requirement gaps and contradictions noted while planning
 - **Closed: keyboard and touch move controls.** DA-18 was approved and `requirements.md` now has FRONT-019-AC17 to AC24, FRONT-025-AC18 to AC21, NFR-007-AC04 to AC06, TEST-005-AC12, TEST-009-AC03, and TEST-009-AC04. T12.04, T12.05, and T12.07 are actionable. T14.08 stays blocked by UD-16 and UD-22.

@@ -1,0 +1,6 @@
+# Development and test dependencies. Includes the production set.
+-r requirements.txt
+pytest==9.2.0
+# Development only: supports a local backend/.env workflow. Production uses Render
+# environment variables, and production code must not import this package unconditionally.
+python-dotenv==1.2.4
