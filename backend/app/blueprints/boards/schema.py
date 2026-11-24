@@ -1,9 +1,18 @@
-from marshmallow import Schema, fields
+from marshmallow import fields
+
+from ...schemas_common import EmailField, RequestSchema, ResponseSchema, StrictUUID, TrimmedString, UtcDateTime
 
 
-class BoardSchema(Schema):
-    name = fields.Str(required=True)
+class BoardSummarySchema(ResponseSchema):
+    id = StrictUUID()
+    name = fields.String()
+    created_at = UtcDateTime()
+    updated_at = UtcDateTime()
 
 
-class MemberSchema(Schema):
-    email = fields.Email(required=True)
+class BoardNameSchema(RequestSchema):
+    name = TrimmedString(required=True)
+
+
+class AddMemberSchema(RequestSchema):
+    email = EmailField(required=True)

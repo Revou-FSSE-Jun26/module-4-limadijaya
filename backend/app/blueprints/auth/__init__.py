@@ -1,4 +1,3 @@
-from flask import Blueprint
+from .routes import auth_bp
 
-bp = Blueprint("auth", __name__)
-from . import routes  # noqa: E402,F401
+__all__ = ["auth_bp"]

@@ -1,30 +1,34 @@
-from flask import request
+import uuid
 
-from app.auth import protected
-from app.blueprints.comments import bp
-from app.blueprints.comments.schema import CommentSchema
-from app.blueprints.comments.service import create, list_for_card, remove, update
-from app.responses import ok
+from flask import Blueprint
+from flask_jwt_extended import jwt_required
 
+from ...http import current_user_id, read_json_body
+from ...responses import ok
+from . import service
 
-def dump(value): return {"id": str(value.id), "card_id": str(value.card_id), "author_id": str(value.author_id), "content": value.content}
-
-
-@bp.post("/cards/<uuid:card_id>/comments")
-@protected
-def create_comment(card_id): return ok(dump(create(card_id, CommentSchema().load(request.get_json() or {}))), 201)
+comments_bp = Blueprint("comments", __name__)
 
 
-@bp.get("/cards/<uuid:card_id>/comments")
-@protected
-def comments(card_id): return ok([dump(value) for value in list_for_card(card_id)])
+@comments_bp.post("/cards/<uuid:card_id>/comments")
+@jwt_required()
+def create_comment(card_id: uuid.UUID):
+    return ok(service.create_comment(current_user_id(), card_id, read_json_body()), 201)
 
 
-@bp.patch("/comments/<uuid:comment_id>")
-@protected
-def patch_comment(comment_id): return ok(dump(update(comment_id, CommentSchema().load(request.get_json() or {}))))
+@comments_bp.get("/cards/<uuid:card_id>/comments")
+@jwt_required()
+def list_comments(card_id: uuid.UUID):
+    return ok(service.list_comments(current_user_id(), card_id))
 
 
-@bp.delete("/comments/<uuid:comment_id>")
-@protected
-def delete_comment(comment_id): remove(comment_id); return ok({"id": str(comment_id)})
+@comments_bp.patch("/comments/<uuid:comment_id>")
+@jwt_required()
+def update_comment(comment_id: uuid.UUID):
+    return ok(service.update_comment(current_user_id(), comment_id, read_json_body()))
+
+
+@comments_bp.delete("/comments/<uuid:comment_id>")
+@jwt_required()
+def delete_comment(comment_id: uuid.UUID):
+    return ok(service.delete_comment(current_user_id(), comment_id))

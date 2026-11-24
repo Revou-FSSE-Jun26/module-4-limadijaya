@@ -1,13 +1,13 @@
-"""User account model."""
-
-from app.extensions import db
-from app.models import TimestampMixin, uuid_primary_key
+from ..extensions import db
+from ._base import timestamp, uuid_pk
 
 
-class User(TimestampMixin, db.Model):
+class User(db.Model):
     __tablename__ = "users"
 
-    id = uuid_primary_key()
+    id = uuid_pk()
     name = db.Column(db.Text, nullable=False)
     email = db.Column(db.Text, nullable=False, unique=True)
     password_hash = db.Column(db.Text, nullable=False)
+    created_at = timestamp()
+    updated_at = timestamp()

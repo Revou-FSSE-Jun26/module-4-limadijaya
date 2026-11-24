@@ -1,31 +1,38 @@
-from flask import request
+import uuid
 
-from app.auth import protected
-from app.blueprints.columns import bp
-from app.blueprints.columns.schema import ColumnSchema, ReorderSchema
-from app.blueprints.columns.service import create, get, remove, reorder, update
-from app.responses import ok
+from flask import Blueprint
+from flask_jwt_extended import jwt_required
 
+from ...http import current_user_id, read_json_body
+from ...responses import ok
+from . import service
+from .schema import ColumnSchema
 
-def dump(column):
-    return {"id": str(column.id), "board_id": str(column.board_id), "name": column.name, "order": column.position, "is_done": column.is_done}
-
-
-@bp.post("/boards/<uuid:board_id>/columns")
-@protected
-def create_column(board_id): return ok(dump(create(board_id, ColumnSchema().load(request.get_json() or {}))), 201)
+columns_bp = Blueprint("columns", __name__)
 
 
-@bp.patch("/columns/<uuid:column_id>")
-@protected
-def patch_column(column_id): return ok(dump(update(column_id, ColumnSchema().load(request.get_json() or {}))))
+@columns_bp.post("/boards/<uuid:board_id>/columns")
+@jwt_required()
+def create_column(board_id: uuid.UUID):
+    column = service.create_column(current_user_id(), board_id, read_json_body())
+    return ok(ColumnSchema().dump(column), 201)
 
 
-@bp.delete("/columns/<uuid:column_id>")
-@protected
-def delete_column(column_id): remove(column_id); return ok({"id": str(column_id)})
+@columns_bp.patch("/boards/<uuid:board_id>/columns/reorder")
+@jwt_required()
+def reorder_columns(board_id: uuid.UUID):
+    columns = service.reorder_columns(current_user_id(), board_id, read_json_body())
+    return ok(ColumnSchema(many=True).dump(columns))
 
 
-@bp.patch("/boards/<uuid:board_id>/columns/reorder")
-@protected
-def reorder_columns(board_id): return ok([dump(column) for column in reorder(board_id, ReorderSchema().load(request.get_json() or {}))])
+@columns_bp.patch("/columns/<uuid:column_id>")
+@jwt_required()
+def update_column(column_id: uuid.UUID):
+    column = service.update_column(current_user_id(), column_id, read_json_body())
+    return ok(ColumnSchema().dump(column))
+
+
+@columns_bp.delete("/columns/<uuid:column_id>")
+@jwt_required()
+def delete_column(column_id: uuid.UUID):
+    return ok(service.delete_column(current_user_id(), column_id))

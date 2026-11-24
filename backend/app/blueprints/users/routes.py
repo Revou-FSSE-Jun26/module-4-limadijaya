@@ -1,23 +1,22 @@
-from flask import request
+from flask import Blueprint
+from flask_jwt_extended import jwt_required
 
-from app.auth import protected
-from app.blueprints.users import bp
-from app.blueprints.users.schema import ProfileSchema
-from app.blueprints.users.service import get_profile, update_profile
-from app.responses import ok
+from ...http import current_user_id, read_json_body
+from ...responses import ok
+from . import service
+from .schema import UserSchema
 
-
-def dump(user):
-    return {"id": str(user.id), "name": user.name, "email": user.email, "created_at": user.created_at.isoformat() if user.created_at else None}
+users_bp = Blueprint("users", __name__)
 
 
-@bp.get("/users/me")
-@protected
-def profile():
-    return ok(dump(get_profile()))
+@users_bp.get("/users/me")
+@jwt_required()
+def get_me():
+    return ok(UserSchema().dump(service.get_me(current_user_id())))
 
 
-@bp.patch("/users/me")
-@protected
-def patch_profile():
-    return ok(dump(update_profile(ProfileSchema().load(request.get_json() or {}))))
+@users_bp.patch("/users/me")
+@jwt_required()
+def update_me():
+    user = service.update_me(current_user_id(), read_json_body())
+    return ok(UserSchema().dump(user))

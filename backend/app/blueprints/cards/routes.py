@@ -1,36 +1,44 @@
-from flask import request
+import uuid
 
-from app.auth import protected
-from app.blueprints.cards import bp
-from app.blueprints.cards.schema import CardPositionSchema, CardSchema
-from app.blueprints.cards.service import assigned, create, get, move, remove, update
-from app.responses import ok
+from flask import Blueprint, request
+from flask_jwt_extended import jwt_required
 
+from ...http import current_user_id, read_json_body
+from ...responses import ok
+from . import service
+from .schema import CardSchema, MyTaskCardSchema
 
-def dump(card):
-    return {"id": str(card.id), "column_id": str(card.column_id), "title": card.title, "order": card.position, "assignee_id": str(card.assignee_id) if card.assignee_id else None}
-
-
-@bp.post("/columns/<uuid:column_id>/cards")
-@protected
-def create_card(column_id): return ok(dump(create(column_id, CardSchema().load(request.get_json() or {}))), 201)
+cards_bp = Blueprint("cards", __name__)
 
 
-@bp.patch("/cards/<uuid:card_id>")
-@protected
-def patch_card(card_id): return ok(dump(update(card_id, CardSchema().load(request.get_json() or {}))))
+@cards_bp.post("/columns/<uuid:column_id>/cards")
+@jwt_required()
+def create_card(column_id: uuid.UUID):
+    card = service.create_card(current_user_id(), column_id, read_json_body())
+    return ok(CardSchema().dump(card), 201)
 
 
-@bp.delete("/cards/<uuid:card_id>")
-@protected
-def delete_card(card_id): remove(card_id); return ok({"id": str(card_id)})
+@cards_bp.patch("/cards/<uuid:card_id>")
+@jwt_required()
+def update_card(card_id: uuid.UUID):
+    card = service.update_card(current_user_id(), card_id, read_json_body())
+    return ok(CardSchema().dump(card))
 
 
-@bp.patch("/cards/<uuid:card_id>/position")
-@protected
-def move_card(card_id): return ok(dump(move(card_id, CardPositionSchema().load(request.get_json() or {}))))
+@cards_bp.delete("/cards/<uuid:card_id>")
+@jwt_required()
+def delete_card(card_id: uuid.UUID):
+    return ok(service.delete_card(current_user_id(), card_id))
 
 
-@bp.get("/cards")
-@protected
-def assigned_cards(): return ok([dump(card) for card in assigned()])
+@cards_bp.patch("/cards/<uuid:card_id>/position")
+@jwt_required()
+def move_card(card_id: uuid.UUID):
+    card, rebalanced = service.move_card(current_user_id(), card_id, read_json_body())
+    return ok({**CardSchema().dump(card), "rebalanced": rebalanced})
+
+
+@cards_bp.get("/cards")
+@jwt_required()
+def my_tasks():
+    return ok(MyTaskCardSchema(many=True).dump(service.list_my_tasks(current_user_id(), request.args)))

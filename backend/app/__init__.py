@@ -1,70 +1,59 @@
-"""Flask application factory."""
-
+"""Application factory (BE-01)."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+import logging
+import time
+import uuid as uuid_module
 
-from flask import Flask, request
+from flask import Flask, g, request
+from flask_cors import CORS
 
-from app.clock import Clock, UtcClock
-from app.config import environment_config
-from app.extensions import db, jwt, migrate
-from app.errors import register_error_handlers
+from .config import build_config
+from .errors import register_error_handlers, register_jwt_callbacks
+from .extensions import db, jwt, migrate
 
 
-def create_app(config: Mapping[str, object] | None = None) -> Flask:
-    """Create and configure the Flask application.
-
-    Tests pass a complete mapping so they do not need production secrets. The
-    normal WSGI entry point omits it and therefore reads required values from
-    the environment and fails fast when one is missing.
-    """
-
+def create_app(config: dict | None = None) -> Flask:
     app = Flask(__name__)
-    app.config.from_mapping(environment_config() if config is None else dict(config))
-    app.extensions["clock"] = app.config.get("CLOCK", UtcClock())
+    app.config.from_mapping(build_config(config))
+
+    logging.basicConfig(level=app.config["LOG_LEVEL"], format="%(asctime)s %(levelname)s %(message)s")
+
+    # Importing the models registers all eight tables with Flask-Migrate.
+    from . import models  # noqa: F401
 
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+
+    # CORS applies to the health route only (BE-19, API-004).
+    CORS(
+        app,
+        resources={r"/api/health": {"origins": [app.config["FRONTEND_ORIGIN"]], "methods": ["GET"]}},
+        supports_credentials=False,
+    )
+
+    register_jwt_callbacks()
     register_error_handlers(app)
 
+    from .blueprints import register_blueprints
+    from .health import health_bp
+
+    register_blueprints(app)
+    app.register_blueprint(health_bp, url_prefix="/api")
+
+    @app.before_request
+    def _start_timer():
+        g.request_id = uuid_module.uuid4().hex[:8]
+        g.started = time.perf_counter()
+
     @app.after_request
-    def add_local_cors(response):
-        origin = request.headers.get("Origin")
-        if origin and origin == app.config.get("FRONTEND_ORIGIN"):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
-            response.headers["Vary"] = "Origin"
+    def _log_request(response):
+        # Never log headers, bodies, tokens, or the database URL (design 4.12).
+        duration_ms = (time.perf_counter() - g.get("started", time.perf_counter())) * 1000
+        app.logger.info(
+            "%s %s %s %s %.1fms", g.get("request_id", "-"), request.method, request.path, response.status_code, duration_ms
+        )
         return response
 
-    from app.blueprints.analytics import bp as analytics_bp
-    from app.blueprints.auth import bp as auth_bp
-    from app.blueprints.boards import bp as boards_bp
-    from app.blueprints.cards import bp as cards_bp
-    from app.blueprints.columns import bp as columns_bp
-    from app.blueprints.comments import bp as comments_bp
-    from app.blueprints.notifications import bp as notifications_bp
-    from app.blueprints.users import bp as users_bp
-
-    for blueprint in (auth_bp, users_bp, boards_bp, columns_bp, cards_bp, comments_bp, notifications_bp, analytics_bp):
-        app.register_blueprint(blueprint, url_prefix="/api")
-
-    @app.get("/api/health")
-    def health():
-        return {"data": {"status": "ok"}}, 200
-
-    # Import model modules so Flask-Migrate sees all approved tables.
-    from app import models  # noqa: F401
-
     return app
-
-
-def get_clock(app: Flask) -> Clock:
-    """Return the injectable application clock."""
-
-    return app.extensions["clock"]
-
-
-__all__ = ["create_app", "db", "get_clock", "jwt", "migrate"]

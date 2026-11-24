@@ -1,4 +1,3 @@
-from flask import Blueprint
+from .routes import comments_bp
 
-bp = Blueprint("comments", __name__)
-from . import routes  # noqa: E402,F401
+__all__ = ["comments_bp"]

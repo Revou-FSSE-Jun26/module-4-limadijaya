@@ -1,4 +1,3 @@
-from flask import Blueprint
+from .routes import cards_bp
 
-bp = Blueprint("cards", __name__)
-from . import routes  # noqa: E402,F401
+__all__ = ["cards_bp"]

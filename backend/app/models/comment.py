@@ -1,16 +1,16 @@
-"""Comment model."""
-
-from app.extensions import db
-from app.models import TimestampMixin, uuid_primary_key
+from ..extensions import db
+from ._base import timestamp, uuid_fk, uuid_pk
 
 
-class Comment(TimestampMixin, db.Model):
+class Comment(db.Model):
+    """Hard-deleted (DB-06). No deleted_at column."""
+
     __tablename__ = "comments"
+    __table_args__ = (db.Index("ix_comments_card_created", "card_id", "created_at"),)
 
-    id = uuid_primary_key()
-    card_id = db.Column(
-        db.ForeignKey("cards.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    author_id = db.Column(db.ForeignKey("users.id"), nullable=False)
+    id = uuid_pk()
+    card_id = uuid_fk("cards.id", ondelete="CASCADE")
+    author_id = uuid_fk("users.id")
     content = db.Column(db.Text, nullable=False)
+    created_at = timestamp()
+    updated_at = timestamp()

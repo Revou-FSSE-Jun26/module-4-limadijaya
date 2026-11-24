@@ -1,22 +1,22 @@
-from flask import request
+import uuid
 
-from app.auth import protected
-from app.blueprints.notifications import bp
-from app.blueprints.notifications.schema import PaginationSchema
-from app.blueprints.notifications.service import list_for_user, mark_read
-from app.responses import ok
+from flask import Blueprint, request
+from flask_jwt_extended import jwt_required
 
+from ...http import current_user_id
+from ...responses import ok
+from . import service
 
-def dump(value): return {"id": str(value.id), "type": value.type, "message": value.message, "is_read": value.is_read, "card_id": str(value.card_id), "board_id": str(value.board_id)}
-
-
-@bp.get("/notifications")
-@protected
-def notifications():
-    query = PaginationSchema().load(request.args.to_dict())
-    return ok([dump(value) for value in list_for_user(query["page"], query["per_page"])])
+notifications_bp = Blueprint("notifications", __name__)
 
 
-@bp.patch("/notifications/<uuid:notification_id>/read")
-@protected
-def read_notification(notification_id): return ok(dump(mark_read(notification_id)))
+@notifications_bp.get("/notifications")
+@jwt_required()
+def list_notifications():
+    return ok(service.list_notifications(current_user_id(), request.args))
+
+
+@notifications_bp.patch("/notifications/<uuid:notification_id>/read")
+@jwt_required()
+def mark_read(notification_id: uuid.UUID):
+    return ok(service.mark_read(current_user_id(), notification_id))

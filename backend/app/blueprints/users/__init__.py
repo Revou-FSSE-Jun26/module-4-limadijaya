@@ -1,4 +1,3 @@
-from flask import Blueprint
+from .routes import users_bp
 
-bp = Blueprint("users", __name__)
-from . import routes  # noqa: E402,F401
+__all__ = ["users_bp"]

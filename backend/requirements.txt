@@ -1,4 +1,4 @@
-# Production dependencies. Direct dependencies are pinned (design 11.8).
+﻿# Production dependencies. Direct dependencies are pinned (design 11.8).
 # Transitive dependencies are resolved by pip and are not pinned here.
 Flask==3.1.3
 Flask-SQLAlchemy==3.1.1
@@ -8,4 +8,4 @@ Flask-JWT-Extended==4.7.4
 marshmallow==4.4.0
 psycopg2-binary==2.9.13
 gunicorn==27.0.1
-# Flask-CORS is added in T3.05.
+Flask-CORS==6.0.5

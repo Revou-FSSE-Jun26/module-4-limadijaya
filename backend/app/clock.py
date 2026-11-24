@@ -1,29 +1,23 @@
-"""Timezone-aware UTC clock used by application services and tests."""
-
+"""Injectable UTC clock (DB-04). Services read the time only through utcnow()."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Protocol
+
+_provider: Callable[[], datetime] | None = None
 
 
-class Clock(Protocol):
-    """Small clock interface that can be replaced by a deterministic test clock."""
-
-    def now(self) -> datetime:
-        """Return the current timezone-aware UTC time."""
-
-
-class UtcClock:
-    """Production clock implementation."""
-
-    def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+def utcnow() -> datetime:
+    """Return the current time as a timezone-aware UTC datetime."""
+    if _provider is not None:
+        value = _provider()
+        if value.tzinfo is None:
+            raise ValueError("The injected clock must return a timezone-aware datetime.")
+        return value.astimezone(timezone.utc)
+    return datetime.now(timezone.utc)
 
 
-def utc_now(clock: Clock | None = None) -> datetime:
-    """Return a timezone-aware UTC value from the supplied or production clock."""
-
-    value = (clock or UtcClock()).now()
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("The application clock must return a timezone-aware datetime.")
-    return value.astimezone(timezone.utc)
+def set_clock(provider: Callable[[], datetime] | None) -> None:
+    """Replace the clock (tests only). Pass None to restore the real clock."""
+    global _provider
+    _provider = provider

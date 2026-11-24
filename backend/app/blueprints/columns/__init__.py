@@ -1,4 +1,3 @@
-from flask import Blueprint
+from .routes import columns_bp
 
-bp = Blueprint("columns", __name__)
-from . import routes  # noqa: E402,F401
+__all__ = ["columns_bp"]

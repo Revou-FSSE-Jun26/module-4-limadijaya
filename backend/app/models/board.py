@@ -1,11 +1,11 @@
-"""Board model."""
-
-from app.extensions import db
-from app.models import TimestampMixin, uuid_primary_key
+from ..extensions import db
+from ._base import timestamp, uuid_pk
 
 
-class Board(TimestampMixin, db.Model):
+class Board(db.Model):
     __tablename__ = "boards"
 
-    id = uuid_primary_key()
+    id = uuid_pk()
     name = db.Column(db.Text, nullable=False)
+    created_at = timestamp()
+    updated_at = timestamp()

@@ -1,5 +1,5 @@
-from marshmallow import Schema
+from ...schemas_common import RequestSchema
 
 
-class AnalyticsSchema(Schema):
-    pass
+class AnalyticsQuerySchema(RequestSchema):
+    """The endpoint accepts no query parameter (ANALYTICS-001-AC09)."""

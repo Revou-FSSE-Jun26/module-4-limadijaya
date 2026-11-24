@@ -1,34 +1,33 @@
-"""Append-only activity event model."""
+from ..extensions import db
+from ._base import timestamp, uuid_fk, uuid_pk
+from sqlalchemy import Uuid
 
-from sqlalchemy.dialects.postgresql import UUID
-
-from app.extensions import db
-from app.models import timestamp_column, uuid_primary_key
+EVENT_CARD_CREATED = "card_created"
+EVENT_CARD_MOVED = "card_moved"
+EVENT_COMMENT_CREATED = "comment_created"
 
 
 class ActivityEvent(db.Model):
+    """Append-only (DB-09). Only board_id cascades. comment_id has no foreign key (DA-14)."""
+
     __tablename__ = "activity_events"
     __table_args__ = (
         db.CheckConstraint(
-            "type IN ('card_created', 'card_moved', 'comment_created')",
-            name="ck_activity_events_type",
+            "type IN ('card_created','card_moved','comment_created')", name="ck_events_type"
         ),
         db.CheckConstraint(
-            "type <> 'card_moved' OR "
-            "(from_column_id IS NOT NULL AND to_column_id IS NOT NULL)",
-            name="ck_activity_events_move_columns",
+            "type <> 'card_moved' OR (from_column_id IS NOT NULL AND to_column_id IS NOT NULL)",
+            name="ck_events_moved_columns",
         ),
+        db.Index("ix_events_board_actor_created", "board_id", "created_at", "actor_id"),
     )
 
-    id = uuid_primary_key()
-    board_id = db.Column(
-        db.ForeignKey("boards.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    actor_id = db.Column(db.ForeignKey("users.id"), nullable=False)
+    id = uuid_pk()
+    board_id = uuid_fk("boards.id", ondelete="CASCADE")
+    actor_id = uuid_fk("users.id")
     type = db.Column(db.Text, nullable=False)
-    card_id = db.Column(db.ForeignKey("cards.id"), nullable=False)
-    comment_id = db.Column(UUID(as_uuid=True), nullable=True)
-    from_column_id = db.Column(db.ForeignKey("columns.id"), nullable=True)
-    to_column_id = db.Column(db.ForeignKey("columns.id"), nullable=True)
-    created_at = timestamp_column()
+    card_id = uuid_fk("cards.id")
+    comment_id = db.Column(Uuid(as_uuid=True), nullable=True)
+    from_column_id = uuid_fk("columns.id", nullable=True)
+    to_column_id = uuid_fk("columns.id", nullable=True)
+    created_at = timestamp()

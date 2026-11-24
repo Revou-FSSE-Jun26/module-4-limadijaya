@@ -1,7 +1,15 @@
-from marshmallow import Schema, fields, validate
+from marshmallow import fields, validate
+
+from ...schemas_common import EmailField, RequestSchema, TrimmedString
 
 
-class CredentialsSchema(Schema):
-    name = fields.Str(required=False, validate=validate.Length(min=1))
-    email = fields.Email(required=True)
-    password = fields.Str(required=True, validate=validate.Length(min=8))
+class RegisterSchema(RequestSchema):
+    name = TrimmedString(required=True)
+    email = EmailField(required=True)
+    # Passwords are never trimmed or echoed. The only rule is "present and non-empty" (UD-21 is open).
+    password = fields.String(required=True, validate=validate.Length(min=1))
+
+
+class LoginSchema(RequestSchema):
+    email = TrimmedString(required=True)
+    password = fields.String(required=True, validate=validate.Length(min=1))

@@ -1,19 +1,26 @@
-"""Card model."""
-
-from app.extensions import db
-from app.models import TimestampMixin, timestamp_column, uuid_primary_key
+from ..extensions import db
+from ._base import timestamp, uuid_fk, uuid_pk
 
 
-class Card(TimestampMixin, db.Model):
+class Card(db.Model):
     __tablename__ = "cards"
-
-    id = uuid_primary_key()
-    column_id = db.Column(
-        db.ForeignKey("columns.id", ondelete="CASCADE"),
-        nullable=False,
+    __table_args__ = (
+        db.Index("ix_cards_column_live", "column_id", "position", postgresql_where=db.text("deleted_at IS NULL")),
+        db.Index("ix_cards_assignee_live", "assignee_id", postgresql_where=db.text("deleted_at IS NULL")),
+        db.Index(
+            "ix_cards_completed_live",
+            "column_id",
+            "completed_at",
+            postgresql_where=db.text("deleted_at IS NULL AND completed_at IS NOT NULL"),
+        ),
     )
+
+    id = uuid_pk()
+    column_id = uuid_fk("columns.id", ondelete="CASCADE")
     title = db.Column(db.Text, nullable=False)
-    position = db.Column(db.Float, nullable=False)
-    assignee_id = db.Column(db.ForeignKey("users.id"), nullable=True)
-    completed_at = timestamp_column(nullable=True)
-    deleted_at = timestamp_column(nullable=True)
+    position = db.Column(db.Float, nullable=False)  # exposed as `order` (DB-05)
+    assignee_id = uuid_fk("users.id", nullable=True)
+    completed_at = timestamp(nullable=True)
+    deleted_at = timestamp(nullable=True)
+    created_at = timestamp()
+    updated_at = timestamp()

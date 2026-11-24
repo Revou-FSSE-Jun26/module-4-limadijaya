@@ -17,6 +17,10 @@ from collections.abc import Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
+from dotenv import load_dotenv
+
+# A local, git-ignored backend/.env may define TEST_DATABASE_URL. Real environment variables win.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=False)
 
 TEST_URL_VARIABLE = "TEST_DATABASE_URL"
 PRODUCTION_URL_VARIABLE = "DATABASE_URL"
@@ -159,3 +163,81 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError(
             "Refusing to run tests: the test database settings could not be validated."
         ) from None
+
+
+# --------------------------------------------------------------------------------------
+# Fixtures (T2.09). They only run after pytest_configure has passed the guard above.
+# --------------------------------------------------------------------------------------
+from datetime import datetime, timezone  # noqa: E402
+
+APPLICATION_TABLES = (
+    "activity_events",
+    "notifications",
+    "comments",
+    "cards",
+    "columns",
+    "board_memberships",
+    "boards",
+    "users",
+)
+
+
+@pytest.fixture(scope="session")
+def app():
+    """Flask app on the local test database, built by `flask db upgrade` (never create_all)."""
+    from flask_migrate import upgrade
+    from sqlalchemy import text
+
+    from app import create_app
+    from app.extensions import db
+
+    flask_app = create_app(
+        {
+            "DATABASE_URL": validated_test_database_url(),
+            "JWT_SECRET_KEY": "test-secret-key-that-is-long-enough-for-hs256",
+            "JWT_ACCESS_TOKEN_EXPIRES_SECONDS": "3600",
+            "FRONTEND_ORIGIN": "http://localhost:3000",
+            "TESTING": True,
+        }
+    )
+    with flask_app.app_context():
+        with db.engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+        upgrade(directory=os.path.join(str(BACKEND_ROOT), "migrations"))
+    yield flask_app
+    with flask_app.app_context():
+        db.session.remove()
+        db.engine.dispose()
+
+
+BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+@pytest.fixture()
+def app_context(app):
+    from app.extensions import db
+
+    with app.app_context():
+        yield app
+        db.session.remove()
+        with db.engine.begin() as connection:
+            from sqlalchemy import text
+
+            connection.execute(text("TRUNCATE " + ", ".join(APPLICATION_TABLES) + " CASCADE"))
+
+
+@pytest.fixture()
+def client(app_context):
+    return app_context.test_client()
+
+
+@pytest.fixture()
+def fixed_clock():
+    """Replace the clock with a controllable one. Tests never depend on the real date."""
+    from app import clock
+
+    state = {"now": datetime(2026, 11, 25, 12, 0, 0, tzinfo=timezone.utc)}
+    clock.set_clock(lambda: state["now"])
+    yield state
+    clock.set_clock(None)
