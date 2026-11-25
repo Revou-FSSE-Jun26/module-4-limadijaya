@@ -2,11 +2,11 @@
 
 RevoTask is a Trello-like task management application built through a disciplined AI-driven development workflow. Users create boards, organize work into columns, move cards between stages with drag-and-drop, collaborate through comments, and track the tasks assigned to them. A Flask API and a Next.js frontend are deployed separately.
 
-**Status.** The API, the frontend, and all three test layers are implemented and pass locally (backend 132 tests plus 103 guard tests, frontend 36 unit tests, 6 Playwright tests). **The public deployments and the Playwright run against the live URL are not done yet**, because they need hosting accounts. See [Deployment](#deployment) for the exact steps, and fill in the two URLs below once they exist.
+**Status.** The API, the frontend, and all three test layers are implemented and pass locally (backend 132 tests plus 103 guard tests, frontend 36 unit tests, 6 Playwright tests). **The Flask API is live on Render. The Vercel frontend and the Playwright run against it are not done yet.** See [Deployment](#deployment) for the exact steps, and fill in the two URLs below once they exist.
 
 | | URL |
 |---|---|
-| Flask API | _add after deployment_ (`GET /api/health` must return 200) |
+| Flask API | https://module-4-limadijaya.onrender.com (`GET /api/health` returns 200). Live smoke output of all eight Blueprints: [`evidence/render-smoke.txt`](evidence/render-smoke.txt) |
 | Next.js app | _add after deployment_ |
 
 ## Project brief

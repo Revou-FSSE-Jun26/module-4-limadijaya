@@ -1,0 +1,22 @@
+﻿OK   GET    /api/health                                      -> 200 (expected 200)
+OK   POST   /api/auth/register                               -> 201 (expected 201)
+OK   POST   /api/auth/login                                  -> 200 (expected 200)
+OK   GET    /api/users/me                                    -> 200 (expected 200)
+OK   POST   /api/boards                                      -> 201 (expected 201)
+OK   GET    /api/boards                                      -> 200 (expected 200)
+OK   GET    /api/boards/33ae75a5-82c6-4132-8a77-a7195bfebf4f -> 200 (expected 200)
+OK   POST   /api/boards/33ae75a5-82c6-4132-8a77-a7195bfebf4f/columns -> 201 (expected 201)
+OK   POST   /api/boards/33ae75a5-82c6-4132-8a77-a7195bfebf4f/columns -> 201 (expected 201)
+OK   POST   /api/columns/540041d7-e9db-4167-9671-89f4365a0c68/cards -> 201 (expected 201)
+OK   PATCH  /api/cards/fb1b4f1b-a346-4c00-aed3-3d484d56db38/position -> 200 (expected 200)
+OK   POST   /api/cards/fb1b4f1b-a346-4c00-aed3-3d484d56db38/comments -> 201 (expected 201)
+OK   GET    /api/cards/fb1b4f1b-a346-4c00-aed3-3d484d56db38/comments -> 200 (expected 200)
+OK   PATCH  /api/comments/8473c5f6-c0ce-4c13-a86e-2097d430a88f -> 200 (expected 200)
+OK   GET    /api/cards?assignee=me                           -> 200 (expected 200)
+OK   GET    /api/notifications                               -> 200 (expected 200)
+OK   GET    /api/boards/33ae75a5-82c6-4132-8a77-a7195bfebf4f/analytics -> 200 (expected 200)
+OK   GET    /api/boards                                      -> 401 (expected 401)
+OK   DELETE /api/boards/33ae75a5-82c6-4132-8a77-a7195bfebf4f -> 200 (expected 200)
+
+All checks passed.
+
