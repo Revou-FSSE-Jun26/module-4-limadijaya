@@ -72,7 +72,7 @@ Commands are for Windows PowerShell. Use `python3`, `source`, and `export` on ma
 ### 1. Flask API
 
 ```powershell
-git clone https://github.com/limadijaya/module-4-limadijaya.git
+git clone https://github.com/Revou-FSSE-Jun26/module-4-limadijaya.git
 cd module-4-limadijaya\backend
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
