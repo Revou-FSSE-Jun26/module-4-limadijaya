@@ -1098,7 +1098,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when (after approval): the approved thresholds are configured. Until then, coverage is reported only.
   - Verify: a run below the threshold fails (after approval).
 
-- [ ] **T14.12 Read-latency measurement script** — ACTIONABLE
+- [x] **T14.12 Read-latency measurement script** — ACTIONABLE
   - Objective: write a script that sends at least 100 sequential requests to each of six read endpoints after one warm-up request and reports p95.
   - Files: C `backend/scripts/measure_latency.py`, M `README.md` (procedure and dataset size).
   - Reqs: NFR-005-AC01, AC02. Design: §9.4.
@@ -1118,7 +1118,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - **Verification before completion (outstanding, not yet verified):** V-02 and V-03. If a check fails, report it and request a new human approval. Do not change the connection mode or the RLS decision silently.
   - Done when: `DATABASE_URL` is the session-mode pooler string with TLS and is stored only in platform settings, the small pool variables are set, and connectivity, `flask db upgrade` through the pooler, the row-locking and concurrency tests, and the connection limit against the pool size have been checked (V-02). RLS is enabled on all eight application tables by migration with no browser-facing policies, the Supabase Data API is disabled if practical, the database role used by Flask reads and writes all eight tables, and the exposure of `alembic_version` is checked (V-03). No Supabase client library, Auth, Storage, or Realtime is used.
   - Verify: the backend connects through the pooler from a workstation and from Render (after T15.02), the concurrency tests pass against it, and `grep` finds no connection string in the repository.
-- [ ] **T15.02 Render service for the Flask API** — BLOCKED (UD-01) and CONDITIONAL (V-02; approved: DA-16)
+- [x] **T15.02 Render service for the Flask API** — BLOCKED (UD-01) and CONDITIONAL (V-02; approved: DA-16)
   - Objective: create the Render web service with `backend/` as the root, a gunicorn start command, the `/api/health` check path, and the environment variables.
   - Files: none in the repository (platform settings), M `README.md`.
   - Reqs: NFR-008-AC02, NFR-004-AC01, NFR-010, API-003-AC02. Design: §11.2, §11.4.
@@ -1136,7 +1136,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: the database is at the latest revision, and a backup was taken first if it had data.
   - Verify: `flask db current` shows head, and the eight tables exist with no extra table.
 
-- [ ] **T15.04 Vercel project for the Next.js app** — ACTIONABLE (approved: DA-04, DA-15)
+- [x] **T15.04 Vercel project for the Next.js app** — ACTIONABLE (approved: DA-04, DA-15)
   - Objective: create the Vercel project with `frontend/` as the root and the environment variables.
   - Files: none in the repository (platform settings), M `frontend/.env.example`.
   - Reqs: NFR-008-AC01, NFR-004-AC02, NFR-010-AC02. Design: §11.1, §11.4.
@@ -1145,7 +1145,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: `API_BASE_URL` and `NEXT_PUBLIC_API_BASE_URL` begin with `https://` and point to Render, and `FRONTEND_ORIGIN` on Render equals the Vercel origin.
   - Verify: the deployed site loads over HTTPS.
 
-- [ ] **T15.05 Production smoke test** — ACTIONABLE (approved: DA-04, DA-05, DA-12, DA-15, DA-16)
+- [x] **T15.05 Production smoke test** — ACTIONABLE (approved: DA-04, DA-05, DA-12, DA-15, DA-16)
   - Objective: verify the deployed system end to end by hand.
   - Files: none.
   - Reqs: NFR-004-AC01 to AC03, NFR-008-AC01 to AC04, FRONT-023-AC01, AC03. Design: §11.5, §11.8.
@@ -1162,7 +1162,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: a body of 1,048,577 bytes is rejected with HTTP 413 and the string envelope at both the Flask and the BFF boundary, a body of 1,048,576 bytes is not rejected for its size, the request-body limit of the Vercel platform is checked to be above 1 MiB (V-06), debug mode is off, and the headers `X-Content-Type-Options`, `Referrer-Policy`, and a frame restriction are present without changing behavior.
   - Verify: a test and a header check against the deployed site.
 
-- [ ] **T15.07 Read-latency measurement on the deployed API** — ACTIONABLE
+- [x] **T15.07 Read-latency measurement on the deployed API** — ACTIONABLE
   - Objective: measure p95 on Render and record the result.
   - Files: M `README.md`.
   - Reqs: NFR-005-AC01, AC02. Design: §9.4.
@@ -1170,7 +1170,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: each available read endpoint has at least 100 sequential requests after one warm-up request, the p95 and dataset size are in the README, and a result above 500 ms is reported as a finding with the cause (for example a free-plan cold start), not hidden. The result is a measurement and not a promise.
   - Verify: the README table matches the script output.
 
-- [ ] **T15.08 Playwright against the production site** — BLOCKED (UD-16, UD-22)
+- [x] **T15.08 Playwright against the production site** — BLOCKED (UD-16, UD-22)
   - Objective: run the end-to-end suites on the deployed Vercel URL.
   - Files: none.
   - Reqs: TEST-007, TEST-008, TEST-009, NFR-008. Design: §10.3, §10.4.

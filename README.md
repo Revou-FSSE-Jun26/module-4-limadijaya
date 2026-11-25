@@ -2,12 +2,12 @@
 
 RevoTask is a Trello-like task management application built through a disciplined AI-driven development workflow. Users create boards, organize work into columns, move cards between stages with drag-and-drop, collaborate through comments, and track the tasks assigned to them. A Flask API and a Next.js frontend are deployed separately.
 
-**Status.** The API, the frontend, and all three test layers are implemented and pass locally (backend 132 tests plus 103 guard tests, frontend 36 unit tests, 6 Playwright tests). **The Flask API is live on Render. The Vercel frontend and the Playwright run against it are not done yet.** See [Deployment](#deployment) for the exact steps, and fill in the two URLs below once they exist.
+**Status.** Both apps are live. All 6 Playwright tests pass against the live Vercel URL, and the backend (132 tests plus 103 guard tests) and frontend (36 tests) suites pass. The only open target is the 500 ms read latency: see [Performance](#performance).
 
 | | URL |
 |---|---|
 | Flask API | https://module-4-limadijaya.onrender.com (`GET /api/health` returns 200). Live smoke output of all eight Blueprints: [`evidence/render-smoke.txt`](evidence/render-smoke.txt) |
-| Next.js app | _add after deployment_ |
+| Next.js app | https://module-4-limadijaya.vercel.app |
 
 ## Project brief
 
@@ -135,7 +135,7 @@ npx playwright test -c e2e/playwright.config.ts
 npx playwright show-report ../evidence/playwright-report
 ```
 
-The suite registers its own throwaway users through the public register endpoint, so it needs no secrets. It covers the 4 auth scenarios (login redirect, invalid credentials, unauthenticated redirect, post-logout redirect) and the 8-step Kanban journey (log in, create a board, add columns, create cards, drag a card and check it after a reload, add and edit a comment, search, assigned-card notification bell), plus a 360 px responsive test. No test uses `waitForTimeout`, and the lint rule `no-restricted-syntax` forbids it. The HTML report is written to `evidence/playwright-report/`. The report currently in the repository comes from a **local** run, and must be replaced by a run against the live URL.
+The suite registers its own throwaway users through the public register endpoint, so it needs no secrets. It covers the 4 auth scenarios (login redirect, invalid credentials, unauthenticated redirect, post-logout redirect) and the 8-step Kanban journey (log in, create a board, add columns, create cards, drag a card and check it after a reload, add and edit a comment, search, assigned-card notification bell), plus a 360 px responsive test. No test uses `waitForTimeout`, and the lint rule `no-restricted-syntax` forbids it. The HTML report is written to `evidence/playwright-report/`. The report in the repository comes from the run against `https://module-4-limadijaya.vercel.app` on 2026-11-25 (6 passed, 0 failed, 0 flaky), and its console output is in `evidence/playwright-live-run.txt`. If Node reports "unable to verify the first certificate" (antivirus HTTPS inspection), set `$env:NODE_OPTIONS="--use-system-ca"`.
 
 ## Deployment
 
@@ -153,7 +153,7 @@ Then run the Playwright suite and `node frontend/scripts/capture-screenshots.mjs
 
 ## Screenshots
 
-These screenshots were taken from a **local** run of the same code. Replace them with captures from the live deployment.
+These screenshots were captured from the live site (`https://module-4-limadijaya.vercel.app`) on 2026-11-25 by `frontend/scripts/capture-screenshots.mjs`.
 
 | | |
 |---|---|
@@ -171,8 +171,25 @@ These screenshots were taken from a **local** run of the same code. Replace them
 | Mobile dashboard (360 px) | ![Mobile dashboard](evidence/screenshots/mobile-dashboard.png) |
 | Mobile board (360 px) | ![Mobile board](evidence/screenshots/mobile-board.png) |
 
-Still to add after deployment: a Postman (or `smoke_api.py`) capture of all eight Blueprints on the public URL, and a screenshot of the Playwright HTML report from the live run.
+| Playwright HTML report, live run: 6 of 6 passed | ![Playwright report](evidence/screenshots/playwright-report.png) |
 
+All eight Blueprints on the public API URL: [`evidence/render-smoke.txt`](evidence/render-smoke.txt) (19 of 19 checks passed, output of `backend/scripts/smoke_api.py`). Take a Postman screenshot of the same calls if your reviewer requires Postman specifically.
+
+## Performance
+
+Measured on 2026-11-25 with `backend/scripts/measure_latency.py https://module-4-limadijaya.onrender.com 30`: one warm-up request, then 30 sequential requests per endpoint, on a board with 3 columns and 6 cards, from a client in Indonesia. Raw output: [`evidence/render-latency.txt`](evidence/render-latency.txt).
+
+| Endpoint | p50 ms | p95 ms |
+|---|---|---|
+| `GET /api/health` (no database) | 295 | 664 |
+| `GET /api/boards` | 685 | 758 |
+| `GET /api/boards/{id}` | 1102 | 1138 |
+| `GET /api/boards/{id}/analytics` | 1006 | 1034 |
+| `GET /api/cards?assignee=me` | 696 | 850 |
+| `GET /api/notifications` | 904 | 1188 |
+| `GET /api/users/me` | 686 | 720 |
+
+**The NFR-005 target (p95 under 500 ms) is not met.** The cause is hosting geography, not the queries. The Render service runs in Oregon (`gcp-us-west1`) and the Supabase database is in Tokyo (`ap-northeast-1`), so every SQL statement crosses the Pacific (about 100 to 200 ms each). The board view runs 5 statements, which is why it is the slowest. The fix is to put both in the same region: either move the Render service to Singapore, or create the Supabase project in Oregon (`us-west-1`), and then re-run the script. The free Render plan also sleeps when idle, and the first request after that takes up to about a minute.
 ## Documentation index
 
 - Specifications: [`specs/requirements.md`](specs/requirements.md), [`specs/design.md`](specs/design.md), [`specs/tasks.md`](specs/tasks.md), [`specs/CHANGELOG.md`](specs/CHANGELOG.md)
