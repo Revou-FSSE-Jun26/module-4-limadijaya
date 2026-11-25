@@ -221,7 +221,7 @@ export default function BoardView({ initialBoard, initialAnalytics, analyticsErr
           This board has no columns yet. Add one above.
         </p>
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-4" data-testid="columns-scroller">
+        <div className="relative flex gap-4 overflow-x-auto pb-4" data-testid="columns-scroller">
           {board.columns.map((column, index) => (
             <section
               key={column.id}

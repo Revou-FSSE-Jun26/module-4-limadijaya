@@ -44,7 +44,8 @@ await page.getByRole("button", { name: "Create board" }).click();
 await page.getByRole("link", { name: "Website redesign" }).waitFor();
 await shot(page, "dashboard", { fullPage: true });
 await page.getByRole("link", { name: "Website redesign" }).click();
-await page.getByRole("heading", { name: "Website redesign" }).waitFor();
+await page.waitForURL(/\/boards\//);
+await page.getByRole("button", { name: "Add column" }).waitFor();
 
 for (const name of ["To do", "Doing", "Done"]) {
   await page.getByLabel("New column name").fill(name);
@@ -123,7 +124,8 @@ await mobilePage.getByRole("button", { name: "Log in" }).click();
 await mobilePage.getByRole("heading", { name: "Your boards" }).waitFor();
 await shot(mobilePage, "mobile-dashboard", { fullPage: true });
 await mobilePage.getByRole("link", { name: "Website redesign" }).click();
-await mobilePage.getByRole("heading", { name: "Website redesign" }).waitFor();
+await mobilePage.waitForURL(/\/boards\//);
+await mobilePage.getByRole("button", { name: "Add column" }).waitFor();
 await shot(mobilePage, "mobile-board", { fullPage: true });
 await mobile.close();
 

@@ -22,6 +22,8 @@ test("usable at 360 px with a non-drag way to move a card (DA-18)", async ({ pag
   await createBoardAndOpen(page, `Mobile board ${Date.now()}`);
   await addColumn(page, "To do");
   await addColumn(page, "Done soon");
+  await addColumn(page, "Third column");
+  await addColumn(page, "Fourth column");
   await addCard(page, "To do", "Tap to move");
   expect(await hasNoHorizontalPageScroll(page)).toBe(true);
 
