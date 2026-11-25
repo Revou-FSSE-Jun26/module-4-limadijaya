@@ -1110,7 +1110,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
 
 ## Milestone 15. Deployment to Render, Vercel and Supabase
 
-- [ ] **T15.01 Supabase project and database connection** — CONDITIONAL (V-02, V-03; approved: DA-16, DA-17)
+- [x] **T15.01 Supabase project and database connection** — CONDITIONAL (V-02, V-03; approved: DA-16, DA-17)
   - Objective: create the Supabase PostgreSQL database, connect the Render Flask API through the session-mode pooler, and apply and verify the approved Row Level Security posture.
   - Files: M `backend/.env.example` (placeholder only), M `README.md`.
   - Reqs: NFR-008-AC03, NFR-004, NFR-002. Design: §11.3, §12.3.1 (V-02, V-03). Guidelines: DB-01.
@@ -1127,7 +1127,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: the service starts only when all required variables are set, and the health check passes over HTTPS.
   - Verify: `GET https://<render-url>/api/health` returns 200 with `{"data": {"status": "ok"}}`.
 
-- [ ] **T15.03 Apply migrations to Supabase** — BLOCKED (UD-16, UD-17)
+- [x] **T15.03 Apply migrations to Supabase** — BLOCKED (UD-16, UD-17)
   - Objective: run `flask db upgrade` against the production database before the first release.
   - Files: M `README.md` (how it was run).
   - Reqs: NFR-009-AC01, NFR-008. Design: §11.6. Guidelines: DB-15, DB-16.

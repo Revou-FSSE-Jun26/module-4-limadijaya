@@ -166,3 +166,9 @@ Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the par
 - `pip` and `npm` both failed on a TLS inspection certificate. Fixed with `pip --use-feature=truststore` and `NODE_OPTIONS=--use-system-ca`, with verification left on.
 - A Windows excluded port range blocks port 5000, so local runs use 5055.
 - Not done yet: concurrency tests (T6.06, T7.08), SQL-capture tests, the Render benchmark (V-01, V-02), deployment to a public URL, and the Playwright run against that URL.
+### 2026-11-25 Supabase database (T15.01, T15.03)
+- The owner supplied the Supabase project. The direct host (`db.<ref>.supabase.co`) has only an AAAA record, and the dev machine and the usual hosts are IPv4 only, so the connection failed with "could not translate host name".
+- The session-mode pooler of the same project (`aws-1-ap-northeast-1.pooler.supabase.com:5432`, user `postgres.<ref>`) accepted the credentials. Before migrating, a read-only query showed the `public` schema was empty.
+- `flask db upgrade` applied `0001_initial`. Verified: 8 application tables plus `alembic_version`, RLS enabled on all 8 (DA-17, V-03 for the schema part), no policies.
+- All Blueprints were exercised against that database through the Flask test client: health, register, login, me, boards, columns, cards, move, comments, my tasks, notifications, analytics, a 401 check, and a board delete with cascade (V-04 passes on the real Supabase PostgreSQL). The throwaway rows were deleted and the table counts returned to 0. Calls took 0.3 to 1.4 s from the dev machine to Tokyo, which is not a deployment latency figure (V-02 and the NFR-005 benchmark are still to be run from the hosting region).
+- The password was shared in the chat. It was used only as a process environment variable and is in no file. **Rotate the database password in Supabase before the repository goes public.**

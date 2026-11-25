@@ -141,7 +141,8 @@ The suite registers its own throwaway users through the public register endpoint
 
 The API and the frontend deploy independently.
 
-**API (Railway or Render).** Create a PostgreSQL database (Supabase, Railway, or Render). Use a `postgresql://...?sslmode=require` URL as `DATABASE_URL`.
+**API (Railway or Render).** Use a PostgreSQL database (Supabase is already provisioned and migrated). Set the pooler URL below as `DATABASE_URL`.
+**Database (Supabase).** Use the **session-mode pooler** connection string from the Supabase dashboard (Connect, Session pooler), not the "Direct connection". The direct host `db.<ref>.supabase.co` resolves to an IPv6 address only, and Render, Railway, and many home networks are IPv4 only, so it fails with "could not translate host name". The pooler URL looks like `postgresql://postgres.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres?sslmode=require`. The migration was applied to the project's database on 2026-11-24 (head `0001_initial`, 8 tables, row-level security on all 8), so the first deploy's `flask db upgrade` is a no-op. Keep the password only in the host's environment settings and never in a file that Git tracks.
 - *Render:* New, Blueprint, pick this repository (`render.yaml`). Enter `DATABASE_URL`, `JWT_SECRET_KEY`, and `FRONTEND_ORIGIN` (the Vercel URL) in the dashboard. The start command applies migrations (`flask db upgrade`) and starts Gunicorn.
 - *Railway:* New project from this repository, root directory `backend`, add a PostgreSQL service, set the same variables. The `Procfile` runs the migration and Gunicorn.
 - Verify: `python backend/scripts/smoke_api.py https://<api-url>` prints one line per Blueprint and must end with "All checks passed". A Postman collection of the same calls works as well.
