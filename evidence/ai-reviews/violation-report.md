@@ -2,7 +2,7 @@
 
 This report documents guideline violations found in AI-generated output during review (NFR-011-AC02). Every entry has the four labeled fields required by NFR-011-AC04. The guidelines are `guidelines/frontend.md` (FE-nn), `guidelines/backend.md` (BE-nn), and `guidelines/database.md` (DB-nn).
 
-Review status: entries 1 to 5 were found by Kiro's own tests, lint, and comparison runs during the build phase. The owner has not reviewed them yet.
+Review status: entries 1 to 5 were found by Kiro's own tests, lint, and comparison runs during the build phase. Reviewed and accepted by Limadijaya Suhendra, 2026-11-25.
 
 ### Violation 1: empty password accepted by a no-op validator
 - **Date and task:** 2026-11-24, T4.02 (`POST /api/auth/register`).

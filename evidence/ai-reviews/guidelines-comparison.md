@@ -45,4 +45,4 @@ Neither agent saw `backend/`. Both received only the model list and the endpoint
 - **Limits:** one task, one run per cell, one reviewer. The checklist was written before the runs and is listed above, but the sample is small.
 
 ## Human review
-- **Reviewed and accepted by:** Pending owner review. Counts were produced by Kiro and can be checked by opening the twelve files in `comparison/`.
+- **Reviewed and accepted by:** Limadijaya Suhendra, 2026-11-25. Counts were produced by Kiro and can be checked by opening the sixteen files in `comparison/`.

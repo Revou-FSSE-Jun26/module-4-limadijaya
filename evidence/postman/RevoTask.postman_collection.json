@@ -1,0 +1,192 @@
+{
+  "info": {
+    "name": "RevoTask live API",
+    "description": "Calls every Blueprint (auth, users, boards, columns, cards, comments, notifications, analytics) on the deployed Flask API. Run it with the Collection Runner. Each request checks its status code. A throwaway user is registered on every run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://module-4-limadijaya.onrender.com" },
+    { "key": "email", "value": "" },
+    { "key": "password", "value": "Postman-pass-1" },
+    { "key": "token", "value": "" },
+    { "key": "boardId", "value": "" },
+    { "key": "todoId", "value": "" },
+    { "key": "doneId", "value": "" },
+    { "key": "cardId", "value": "" },
+    { "key": "commentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "health - GET /api/health",
+      "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/health" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 and status ok', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.status).to.eql('ok'); });"
+      ] } }]
+    },
+    {
+      "name": "auth - POST /api/auth/register",
+      "request": {
+        "auth": { "type": "noauth" }, "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"name\": \"Postman Tester\", \"email\": \"{{email}}\", \"password\": \"{{password}}\"}" }
+      },
+      "event": [
+        { "listen": "prerequest", "script": { "exec": [
+          "pm.collectionVariables.set('email', `postman-${Date.now()}@example.com`);"
+        ] } },
+        { "listen": "test", "script": { "exec": [
+          "pm.test('201 and no password in body', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().data).to.not.have.property('password_hash'); });"
+        ] } }
+      ]
+    },
+    {
+      "name": "auth - POST /api/auth/login",
+      "request": {
+        "auth": { "type": "noauth" }, "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\": \"{{email}}\", \"password\": \"{{password}}\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 and a JWT', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.access_token).to.be.a('string'); });",
+        "pm.collectionVariables.set('token', pm.response.json().data.access_token);"
+      ] } }]
+    },
+    {
+      "name": "users - GET /api/users/me",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/users/me" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 without password', () => { pm.response.to.have.status(200); pm.expect(Object.keys(pm.response.json().data)).to.have.members(['id','name','email']); });"
+      ] } }]
+    },
+    {
+      "name": "boards - POST /api/boards",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/boards",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"name\": \"Postman board\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201', () => pm.response.to.have.status(201));",
+        "pm.collectionVariables.set('boardId', pm.response.json().data.id);"
+      ] } }]
+    },
+    {
+      "name": "boards - GET /api/boards",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/boards" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "columns - POST /api/boards/{id}/columns (To do)",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/boards/{{boardId}}/columns",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"name\": \"To do\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201 with a float order', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().data.order).to.be.a('number'); });",
+        "pm.collectionVariables.set('todoId', pm.response.json().data.id);"
+      ] } }]
+    },
+    {
+      "name": "columns - POST /api/boards/{id}/columns (Done)",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/boards/{{boardId}}/columns",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"name\": \"Done\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201', () => pm.response.to.have.status(201));",
+        "pm.collectionVariables.set('doneId', pm.response.json().data.id);"
+      ] } }]
+    },
+    {
+      "name": "cards - POST /api/columns/{id}/cards",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/columns/{{todoId}}/cards",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"title\": \"Postman card\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201', () => pm.response.to.have.status(201));",
+        "pm.collectionVariables.set('cardId', pm.response.json().data.id);"
+      ] } }]
+    },
+    {
+      "name": "cards - PATCH /api/cards/{id}/position",
+      "request": {
+        "method": "PATCH", "url": "{{baseUrl}}/api/cards/{{cardId}}/position",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"column_id\": \"{{doneId}}\", \"order\": 1536.5}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200, moved to Done', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.column_id).to.eql(pm.collectionVariables.get('doneId')); });"
+      ] } }]
+    },
+    {
+      "name": "boards - GET /api/boards/{id} (columns and cards nested)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/boards/{{boardId}}" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 with nested cards', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.columns[1].cards.length).to.eql(1); });"
+      ] } }]
+    },
+    {
+      "name": "comments - POST /api/cards/{id}/comments",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/cards/{{cardId}}/comments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"content\": \"Looks good\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201', () => pm.response.to.have.status(201));",
+        "pm.collectionVariables.set('commentId', pm.response.json().data.id);"
+      ] } }]
+    },
+    {
+      "name": "comments - GET /api/cards/{id}/comments",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/cards/{{cardId}}/comments" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "comments - PATCH /api/comments/{id}",
+      "request": {
+        "method": "PATCH", "url": "{{baseUrl}}/api/comments/{{commentId}}",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"content\": \"Edited in Postman\"}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "cards - GET /api/cards?assignee=me",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/cards?assignee=me" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "notifications - GET /api/notifications?page=1&per_page=20",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications?page=1&per_page=20" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    },
+    {
+      "name": "analytics - GET /api/boards/{id}/analytics",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/boards/{{boardId}}/analytics" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 with the four keys', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.have.all.keys('window','cards_per_column','completed_this_week','member_activity'); });"
+      ] } }]
+    },
+    {
+      "name": "boards - GET /api/boards without a token (401)",
+      "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api/boards" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('401 error envelope', () => { pm.response.to.have.status(401); pm.expect(pm.response.json().error).to.be.a('string'); });"
+      ] } }]
+    },
+    {
+      "name": "boards - DELETE /api/boards/{id}",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/boards/{{boardId}}" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }]
+    }
+  ]
+}

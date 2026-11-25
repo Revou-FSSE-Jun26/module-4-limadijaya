@@ -20,7 +20,9 @@ import pytest
 from dotenv import load_dotenv
 
 # A local, git-ignored backend/.env may define TEST_DATABASE_URL. Real environment variables win.
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=False)
+# REVOTASK_NO_DOTENV=1 skips it, so the startup tests can prove the guard refuses a missing TEST_DATABASE_URL.
+if os.environ.get("REVOTASK_NO_DOTENV") != "1":
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=False)
 
 TEST_URL_VARIABLE = "TEST_DATABASE_URL"
 PRODUCTION_URL_VARIABLE = "DATABASE_URL"

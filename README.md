@@ -40,7 +40,7 @@ Next.js 16, React 19, TypeScript, Tailwind CSS, react-hot-toast, Playwright, Vit
 5. **Measured effect of the guidelines.** The same Blueprint was generated with and without the guidelines in clean contexts. Without them the isolated run broke 9 of 9 checked rules, and with them 0 of 9. The limits of that experiment are in [`evidence/ai-reviews/guidelines-comparison.md`](evidence/ai-reviews/guidelines-comparison.md).
 6. **Tests and documentation.** Tests were written with each feature. Kiro CLI is the intended tool for refining test cases and documentation passes. Any change a test run caused is logged in the changelog.
 
-Two honest notes: several open decisions (token lifetime, notification pagination, E2E accounts) were taken by Kiro after the owner delegated the work, and are listed as pending confirmation in the changelog. The tests were also run on a scratch PostgreSQL 17 cluster, because the owner's test-database password was not available to Kiro.
+Two honest notes: several open decisions (token lifetime, notification pagination, E2E accounts) were taken by Kiro after the owner delegated the work, and the owner approved them afterwards (changelog). The tests were also run on a scratch PostgreSQL 17 cluster, because the owner's test-database password was not available to Kiro.
 
 ## Repository structure
 
@@ -173,7 +173,11 @@ These screenshots were captured from the live site (`https://module-4-limadijaya
 
 | Playwright HTML report, live run: 6 of 6 passed | ![Playwright report](evidence/screenshots/playwright-report.png) |
 
-All eight Blueprints on the public API URL: [`evidence/render-smoke.txt`](evidence/render-smoke.txt) (19 of 19 checks passed, output of `backend/scripts/smoke_api.py`). Take a Postman screenshot of the same calls if your reviewer requires Postman specifically.
+All eight Blueprints on the public API URL: [`evidence/render-smoke.txt`](evidence/render-smoke.txt) (19 of 19 checks passed, output of `backend/scripts/smoke_api.py`). The same calls as a Postman collection: [`evidence/postman/RevoTask.postman_collection.json`](evidence/postman/RevoTask.postman_collection.json) (import it, then run it with the Collection Runner).
+
+| Postman Collection Runner on the public API URL: 19 of 19 passed, all eight Blueprints (1 of 3) | ![Postman](evidence/screenshots/postman.png) |
+| Postman run (2 of 3): cards, position, board detail, comments | ![Postman 2](evidence/screenshots/postman2.png) |
+| Postman run (3 of 3): comments, my tasks, notifications, analytics, 401, delete | ![Postman 3](evidence/screenshots/postman3.png) |
 
 ## Performance
 

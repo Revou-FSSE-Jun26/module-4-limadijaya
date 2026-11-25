@@ -325,6 +325,7 @@ def run_pytest_startup(**variables):
         if key not in ("TEST_DATABASE_URL", "DATABASE_URL") and not key.startswith("PG")
     }
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["REVOTASK_NO_DOTENV"] = "1"  # a local backend/.env must not refill the removed variables
     env.update(variables)
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q",

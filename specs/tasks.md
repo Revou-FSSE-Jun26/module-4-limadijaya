@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open, but Kiro took working decisions for UD-01, 02, 09, 15, 16, 17, 21, 22 on the owner's delegation (see `CHANGELOG.md`, pending owner confirmation). The ten verification obligations (V-01 to V-10) are outstanding. Milestones 1 to 13 are implemented and tested locally. Not done: concurrency tests (T6.06, T7.08), SQL-capture tests, T4.06, T4.07, T8.05, T9.04, T9.09, T10.11, T11.11, T11.12, T12.06, T12.07, T13.06, T13.07, T14.01 to T14.03, T14.08 to T14.12, and all of Milestones 15 and 16 that need a deployment. |
+| Status | Draft. T1.01 is complete: DA-01 to DA-19 were approved by the human owner (Limadijaya Suhendra, 2026-11-24). The nine unresolved decisions (UD) remain open, and Kiro took working decisions for UD-01, 02, 09, 15, 16, 17, 21, 22 on the owner's delegation, which the owner approved on 2026-11-25 (see `CHANGELOG.md`). The ten verification obligations (V-01 to V-10) are outstanding. Milestones 1 to 13 are implemented and tested locally. Not done: concurrency tests (T6.06, T7.08), SQL-capture tests, T4.06, T4.07, T8.05, T9.04, T9.09, T10.11, T11.11, T11.12, T12.06, T12.07, T13.06, T13.07, T14.01 to T14.03, T14.08 to T14.12, and all of Milestones 15 and 16 that need a deployment. |
 | Authoritative sources | `specs/requirements.md` (behavior, API contracts, acceptance criteria), then `specs/design.md`, then `guidelines/frontend.md`, `guidelines/backend.md`, `guidelines/database.md`, then `specs/PROJECT_BRIEF.md` |
 | Rule of precedence | If a task, the design, or a guideline disagrees with the requirements, the requirements win and the task is corrected before it is implemented. |
 | Scope | 26 mandatory endpoints, 1 approved extension (`POST /api/boards/{id}/members`), 6 pages, 8 Blueprints, 8 database entities. No task adds an endpoint, page, entity, or functional requirement. |
@@ -1207,7 +1207,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: a new developer can run both apps and all test suites from the README, and the README lists UD-01, 02, 07, 09, 15, 16, 17, 21, 22 as open unless a human has approved them.
   - Verify: a second person follows the README from a clean clone.
 
-- [ ] **T16.03 Changelog with refinement rounds** — ACTIONABLE
+- [x] **T16.03 Changelog with refinement rounds** — ACTIONABLE
   - Objective: record at least five before-and-after refinement rounds of the AI-assisted workflow.
   - Files: M `specs/CHANGELOG.md`.
   - Reqs: NFR-011-AC01. Design: §2.1.
@@ -1215,7 +1215,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: each round has a "Before" entry and an "After" entry that quote or summarize the artifact states.
   - Verify: the file has at least five rounds.
 
-- [ ] **T16.04 Guideline violation report** — ACTIONABLE
+- [x] **T16.04 Guideline violation report** — ACTIONABLE
   - Objective: document at least three guideline violations found in AI output.
   - Files: M `evidence/ai-reviews/violation-report.md`.
   - Reqs: NFR-011-AC02, AC04. Design: §2.1.
@@ -1223,7 +1223,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: each entry has the four labeled fields (guideline violated, offending code or evidence, correction, verification of the correction), and cites a guideline ID.
   - Verify: the file has at least three entries with all four fields.
 
-- [ ] **T16.05 With-and-without-guidelines comparison** — ACTIONABLE
+- [x] **T16.05 With-and-without-guidelines comparison** — ACTIONABLE
   - Objective: compare one identical task generated without and with the guidelines.
   - Files: M `evidence/ai-reviews/guidelines-comparison.md`.
   - Reqs: NFR-011-AC07. Design: §2.1.
@@ -1231,7 +1231,7 @@ Most tests are written inside the feature tasks above. This milestone audits the
   - Done when: for each run the document gives the number of guideline violations found in review and the number of tests passing on the first run, and states the difference. The numbers are measured, not estimated.
   - Verify: a reviewer can reproduce the counts from the saved outputs.
 
-- [ ] **T16.06 Human review records** — ACTIONABLE
+- [x] **T16.06 Human review records** — ACTIONABLE
   - Objective: confirm that every AI-generated change has a recorded human review.
   - Files: M `specs/CHANGELOG.md`.
   - Reqs: NFR-011-AC03. Design: §2.1.

@@ -21,7 +21,7 @@ Only facts that were verified are recorded here. A commit ID is written only aft
 - **Reviewed and accepted by:** <name>, <date>
 ```
 
-Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the parent commit and the After text from the commit named in each round (`git show <commit>` shows the exact diff). Each commit exists only because the owner accepted it. Rounds 8 to 11 are implementation review rounds from the build phase and are marked pending until the owner reviews them.
+Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the parent commit and the After text from the commit named in each round (`git show <commit>` shows the exact diff). Each commit exists only because the owner accepted it. Rounds 8 to 12 are implementation review rounds from the build phase. The owner reviewed and accepted rounds 8 to 11 on 2026-11-25.
 
 ### Round 1: requirements.md, administrator permissions (2026-11-20, commit `127a60f`)
 - **Artifact:** `specs/requirements.md`, roles and permissions.
@@ -77,29 +77,35 @@ Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the par
 - **Before:** `password = fields.String(required=True, validate=lambda v: len(v) > 0)`. The AI draft assumed a validator that returns `False` rejects the value, as in Marshmallow 3.
 - **Issue found in review:** `test_register_validation_errors_are_400` failed on its first run: `register(password="")` returned 201 instead of 400. Marshmallow 4 only rejects a value when the validator raises `ValidationError`. Guideline BE-06 (validate every input strictly).
 - **After:** `validate=validate.Length(min=1)`. The test passes and an empty password now returns 400.
-- **Reviewed and accepted by:** Pending owner review.
+- **Reviewed and accepted by:** Limadijaya Suhendra, 2026-11-25.
 
 ### Round 9: backend code, duplicated query validation (2026-11-24, build phase)
 - **Artifact:** `backend/app/blueprints/cards/schema.py` and `service.py` (`GET /api/cards?assignee=me`).
 - **Before:** A hand-written `load_checked()` method on the schema, called after `load_query()`, so the query was validated twice and the second check lived outside the schema rules.
 - **Issue found in review:** Duplicate validation and a business check inside a custom method (BE-03 layering, BE-06 one strict schema).
 - **After:** One declarative rule, `assignee = fields.String(required=True, validate=validate.Equal("me"))`, and one `load_query()` call. Tests cover missing, wrong, and extra parameters (all 400).
-- **Reviewed and accepted by:** Pending owner review.
+- **Reviewed and accepted by:** Limadijaya Suhendra, 2026-11-25.
 
 ### Round 10: frontend code, raw button in a test (2026-11-24, build phase)
 - **Artifact:** `frontend/tests/unit/BaseComponents.test.tsx`.
 - **Before:** The AI-written modal test used `<button id="opener">open</button>` as the element that opens the dialog.
 - **Issue found in review:** `npx eslint .` failed with "Use BaseButton instead of a raw <button> (FE-11)". The lint rule added in T1.06 caught the violation.
 - **After:** The opener is an `<a href="#top">`. Lint passes and the focus-return assertion is unchanged.
-- **Reviewed and accepted by:** Pending owner review.
+- **Reviewed and accepted by:** Limadijaya Suhendra, 2026-11-25.
 
 ### Round 11: design.md and guidelines, shared component folder (2026-11-24, build phase)
 - **Artifact:** `specs/design.md` section 2.1 and `frontend/eslint.config.mjs`.
 - **Before:** The layout placed `BaseButton`, `BaseBadge`, and `BaseModal` in `components/ui/`.
 - **Issue found in review:** The assignment brief and its grading checklist name `components/shared/`. A folder name that differs from the brief would fail a literal check.
 - **After:** The three components live in `frontend/src/components/shared/`. The design tree and the ESLint exception that lets only `BaseButton.tsx` render a `<button>` use the new path.
-- **Reviewed and accepted by:** Pending owner review.
+- **Reviewed and accepted by:** Limadijaya Suhendra, 2026-11-25.
 
+### Round 12: test guard defeated by the new .env loading (2026-11-25, owner's local test run)
+- **Artifact:** `backend/tests/conftest.py` and `backend/tests/test_database_guard.py`.
+- **Before:** `conftest.py` called `load_dotenv(".../backend/.env")` on every run so a developer could keep `TEST_DATABASE_URL` in `backend/.env`. That line was added in the build phase and was tested only on a machine with no `.env`.
+- **Issue found in review:** the owner ran `pytest -v` on their own machine with a real `backend/.env`: 234 passed and 1 failed. `test_pytest_startup_fails_closed_for_unsafe_settings[test-url-missing]` expected exit code 4 and got 0. The test removes `TEST_DATABASE_URL` to prove the guard refuses to start without it, and `load_dotenv` read the value straight back from `.env`, so the guard passed. Guideline DB-02 (production and test databases are separate, and the guard must fail closed).
+- **After:** `.env` is loaded only when `REVOTASK_NO_DOTENV` is not `1`, and the startup test sets `REVOTASK_NO_DOTENV=1` for its subprocess. With the same `.env` in place, `pytest tests/test_database_guard.py` reports 103 passed.
+- **Reviewed and accepted by:** Kiro found the cause from the owner's test output. Owner acceptance pending.
 ---
 
 ## Implementation log
@@ -149,7 +155,7 @@ Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the par
 | `d3edec9` | Milestones 2 to 9 | Eight models, the initial migration (with RLS), the application factory, eight Blueprints, and 132 pytest tests (the 103 guard tests from T1.04 run on top of these). |
 | `f612e5d` | Milestones 10 to 13 | Next.js pages, shared components, hooks, API client, BFF proxy, Vitest tests (36), and the Playwright suite (6 tests). |
 
-**Decisions the owner delegated to Kiro.** On 2026-11-24 the owner wrote "From now on I depend on you to complete the assignment". Kiro took the decisions below to unblock the work. They are **not** owner approvals in the sense of `tasks.md` rule 6, so they stay open until the owner confirms or changes them.
+**Decisions the owner delegated to Kiro.** On 2026-11-24 the owner wrote "From now on I depend on you to complete the assignment". Kiro took the decisions below to unblock the work. The owner reviewed this table and approved every decision in it on 2026-11-25 ("I agree all of them"). Kiro transcribed the approval and did not approve anything itself.
 | UD | Decision taken | Where |
 |---|---|---|
 | UD-01 | Token lifetime 3600 s. The value is still required from the environment, with no default in code. | `render.yaml`, `.env.example` |
@@ -180,3 +186,7 @@ Rounds 1 to 7 are spec refinement rounds. The Before text is quoted from the par
 - **Defect found on the live site and fixed:** the 360 px board page was 636 px wide. The responsive test had passed because it used only 2 columns. Cause: Tailwind's `sr-only` labels are `position: absolute`, and inside the horizontally scrolling columns container they positioned against the page, so off-screen columns widened the document. Fix: `relative` on the scroller (commit `70d6607`). The test now uses 4 columns. Measured after the fix: `scrollWidth` 360 for a 360 px viewport.
 - Latency: p95 0.7 to 1.2 s for reads (NFR-005 target 500 ms **not met**), caused by Render in Oregon and Supabase in Tokyo. Recorded in the README.
 - All throwaway accounts from these runs (24 users, 13 boards) were deleted. The production tables are empty.
+### 2026-11-25 Owner verification
+- Postman Collection Runner against `https://module-4-limadijaya.onrender.com`: 19 of 19 requests passed, 0 failed, covering all eight Blueprints (`evidence/screenshots/postman.png`, `postman2.png`, `postman3.png`, collection in `evidence/postman/`).
+- `pytest -v` on the owner's local PostgreSQL test database: 234 passed, 1 failed, then fixed in Round 12.
+- The owner decided to keep the current Supabase password.
